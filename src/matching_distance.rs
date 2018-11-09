@@ -1,5 +1,3 @@
-#[cfg(feature="hera")]
-mod matching_distance {
 use rivet;
 use std::cmp;
 use hera;
@@ -168,5 +166,4 @@ fn calculate_weight(m: &Array1<f64>, normalize: bool, delta_x: f64, delta_y: f64
     let q = maximum(&effective_m, &recip(&effective_m));
     let w = (1.0 / (1.0 + q.map(|x|x.powi(2)))).map(|x|x.sqrt());
     w
-}
 }

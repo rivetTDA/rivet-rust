@@ -28,8 +28,9 @@ extern crate log;
 extern crate serde;
 extern crate core;
 
+mod rivet;
 #[cfg(feature="hera")]
 mod hera;
-mod rivet;
+#[cfg(feature="hera")]
 mod matching_distance;
 mod hilbert_distance;

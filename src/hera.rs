@@ -1,5 +1,3 @@
-#[cfg(feature="hera")]
-mod hera {
 use ndarray::Array2;
 
 enum PointSet {}
@@ -75,5 +73,4 @@ pub fn bottleneck_distance(lhs: &Array2<f64>, rhs: &Array2<f64>) -> Option<f64> 
         };
         return Some(dist);
     }
-}
 }
