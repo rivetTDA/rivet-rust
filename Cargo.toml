@@ -1,0 +1,31 @@
+[package]
+name = "rivet-rust"
+version = "0.1.0"
+authors = ["Bryn Keller <bryn.keller@intel.com>"]
+build = "build.rs"
+
+[features]
+hera=[]
+
+[profile.release]
+debug = true
+
+[dependencies]
+csv = "0.15"
+#docopt = "0.8"
+rand = "0.3"
+flexi_logger = "0.6"
+#glob = "0.2"
+itertools = "0.7"
+libc = "0.2.0"
+log = "0.3"
+ndarray = { git = "https://github.com/xoltar/ndarray" , branch = "more-literal", features = ["serde-1"] }
+noisy_float = { version = "0.1.4", features = ["serde-1"] }
+num-iter = "0.1"
+num-integer = "0.1.36"
+num-traits = "0.1.42"
+num-rational = "0.1.42"
+serde = "1.0"
+serde_derive = "1.0"
+#serde_yaml = "0.7"
+#time = "0.1"
