@@ -212,6 +212,7 @@ pub fn structure(computation: &ComputationResult) -> BettiStructure {
             let y_grade = (*(*structure).grades).y_grades.offset(y as isize);
             y_grades.push(Rational64::from(((*y_grade).nom, (*y_grade).denom)));
         }
+        free_structure_points(structure);
 
         BettiStructure {
             x_grades,
