@@ -25,7 +25,7 @@ In the future, installation via crates.io will be supported. Currently, the best
    or
    ```
    [dependencies]
-   rivet-rust = {path = "$SRC/rivet-rust" features="hera"}
+   rivet-rust = {path = "$SRC/rivet-rust" features=["hera"]}
    ```
    Remember to replace `$SRC` with the real path!
 
