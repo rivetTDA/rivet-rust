@@ -1,4 +1,5 @@
 use rivet;
+use rivet::RivetError;
 use std::cmp;
 use hera;
 use ndarray::{Array1, Zip};
@@ -102,9 +103,9 @@ pub fn match_dist(multi_bars1: &[rivet::BarCode],
         MatchResult { distance: m_dist, error_count: failures }
     }
 }
-pub fn matching_distance(lhs: &[u8], rhs: &[u8], grid_size: u32, normalize: bool) -> MatchResult {
-    let comp1 = rivet::parse(lhs);
-    let comp2 = rivet::parse(rhs);
+pub fn matching_distance(lhs: &[u8], rhs: &[u8], grid_size: u32, normalize: bool) -> Result<MatchResult, RivetError> {
+    let comp1 = rivet::parse(lhs)?;
+    let comp2 = rivet::parse(rhs)?;
     //    # First, use fixed_bounds to set the upper right corner and lower-left
     //    # corner to be considered.
     //    if fixed_bounds is None:
@@ -117,12 +118,12 @@ pub fn matching_distance(lhs: &[u8], rhs: &[u8], grid_size: u32, normalize: bool
     let lines = generate_lines(grid_size, ul, lr);
     //    # next, for each of the two 2-D persistence modules, get the barcode
     //    # associated to the list of lines.
-    let multi_bars1 = rivet::barcodes(&comp1, &lines);
+    let multi_bars1 = rivet::barcodes(&comp1, &lines)?;
 //    println!("bars1: {:?}", multi_bars1);
-    let multi_bars2 = rivet::barcodes(&comp2, &lines);
+    let multi_bars2 = rivet::barcodes(&comp2, &lines)?;
 //    println!("bars2: {:?}", multi_bars2);
 //    # first compute the unweighted distance between the pairs
-    match_dist(multi_bars1.as_ref(), multi_bars2.as_ref(), &fixed_bounds, lines.as_ref(), normalize)
+    Ok(match_dist(multi_bars1.as_ref(), multi_bars2.as_ref(), &fixed_bounds, lines.as_ref(), normalize))
 }
 
 fn recip(arr: &Array1<f64>) -> Array1<f64> {

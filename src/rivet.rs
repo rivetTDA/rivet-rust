@@ -2,6 +2,9 @@ use libc::{c_void, size_t};
 use ndarray::Array2;
 use std::f64;
 use num_rational::Rational64;
+use std::os::raw::c_char;
+use std::ffi::CStr;
+use std::ptr;
 
 #[repr(C)]
 struct CBar {
@@ -22,10 +25,12 @@ struct CBarCode {
 struct CBarCodesResult {
     pub barcodes: *const CBarCode,
     pub length: size_t,
-    pub x_low: f64,
-    pub y_low: f64,
-    pub x_high: f64,
-    pub y_high: f64
+    pub error: *const c_char,
+    pub error_length: size_t
+//    pub x_low: f64,
+//    pub y_low: f64,
+//    pub x_high: f64,
+//    pub y_high: f64
 }
 
 #[repr(C)]
@@ -104,18 +109,25 @@ struct ArrangementBounds {
     y_high: f64
 }
 
+#[repr(C)]
+struct RivetComputationResult {
+    computation: *mut RivetArrangement,
+    error: *const c_char,
+    error_length: size_t
+}
+
 #[link(name = "rivet")]
 extern {
-    fn read_rivet_computation(bytes: *const u8, length: size_t) -> *mut RivetArrangement;
+    fn read_rivet_computation(bytes: *const u8, length: size_t) -> RivetComputationResult;
     fn bounds_from_computation(computation: *mut RivetArrangement) -> ArrangementBounds;
     fn barcodes_from_computation(computation: *mut RivetArrangement,
                            angles: *const f64,
                            offsets: *const f64,
-                           query_length: size_t) -> *mut CBarCodesResult;
+                           query_length: size_t) -> CBarCodesResult;
     fn structure_from_computation(computation: *const RivetArrangement) -> *mut CStructurePoints;
 
-    fn free_barcodes_result(result: *mut CBarCodesResult) -> c_void;
-    fn free_rivet_computation(computation: *mut RivetArrangement);
+    fn free_barcodes_result(result: CBarCodesResult) -> c_void;
+    fn free_rivet_computation_result(result: RivetComputationResult);
     fn free_structure_points(points: *mut CStructurePoints);
 }
 
@@ -128,17 +140,52 @@ pub struct ComputationResult {
 impl Drop for ComputationResult {
     fn drop(&mut self) {
         unsafe {
-            free_rivet_computation(self.arr);
+            free_rivet_computation_result(RivetComputationResult{
+                computation: self.arr,
+                error: ptr::null(),
+                error_length: 0
+            });
         }
     }
 }
 
-pub fn parse(bytes: &[u8]) -> ComputationResult {
-    let rivet_comp = unsafe {
-        let comp = read_rivet_computation(bytes.as_ptr(), bytes.len());
-        comp
-    };
-    ComputationResult{arr: rivet_comp}
+#[derive(Debug)]
+pub enum RivetErrorKind {
+    InputValidation,
+    IO,
+    Computation
+}
+
+#[derive(Debug)]
+pub struct RivetError {
+    message: String,
+    kind: RivetErrorKind
+}
+
+pub fn parse(bytes: &[u8]) -> Result<ComputationResult,RivetError> {
+    if bytes.len() == 0 {
+        Err(RivetError {
+            message: "Byte array must have non-zero length".to_string(),
+            kind: RivetErrorKind::InputValidation
+        })
+    } else {
+        let rivet_comp = unsafe {
+            read_rivet_computation(bytes.as_ptr(), bytes.len())
+        };
+        if !rivet_comp.error.is_null() {
+            let message = unsafe { CStr::from_ptr(rivet_comp.error) }
+                .to_owned().to_str().expect("Could not convert C string").to_string();
+            unsafe {
+                free_rivet_computation_result(rivet_comp);
+            }
+            Err(RivetError {
+                message: format!("Error while reading computation: {}", message),
+                kind: RivetErrorKind::IO
+            })
+        } else {
+            Ok(ComputationResult { arr: rivet_comp.computation })
+        }
+    }
 }
 
 pub fn bounds(computation: &ComputationResult) -> Bounds {
@@ -155,7 +202,8 @@ pub fn bounds(computation: &ComputationResult) -> Bounds {
     }
 }
 
-pub fn barcodes(computation: &ComputationResult, angle_offsets: &[(f64, f64)]) -> Vec<BarCode> {
+pub fn barcodes(computation: &ComputationResult, angle_offsets: &[(f64, f64)])
+    -> Result<Vec<BarCode>,RivetError> {
     let angles: Vec<f64> = angle_offsets.iter().map(|p|{p.0}).collect();
     let offsets: Vec<f64> = angle_offsets.iter().map(|p|{p.1}).collect();
     let mut barcodes : Vec<BarCode> = Vec::new();
@@ -164,24 +212,34 @@ pub fn barcodes(computation: &ComputationResult, angle_offsets: &[(f64, f64)]) -
                                               angles.as_ptr(),
                                                 offsets.as_ptr(),
                                               angle_offsets.len());
-        for bc in 0..(*cbars).length {
-            let bcp = (*cbars).barcodes.offset(bc as isize);
-            let mut bars = Array2::zeros(((*bcp).length, 3));
-            for b in 0..(*bcp).length {
-                let bp = (*bcp).bars.offset(b as isize);
-                bars[[b, 0]] = (*bp).birth;
-                bars[[b, 1]] = match (*bp).death {
-                    d if d.is_infinite() || d.is_nan() => 1e6, //f64::MAX,
-                    d => d
-                };
-                bars[[b, 2]] = (*bp).multiplicity as f64;
+        if !cbars.error.is_null() {
+            let message = CStr::from_ptr(cbars.error)
+                .to_owned().to_str().expect("Could not convert C string").to_string();
+            free_barcodes_result(cbars);
+            Err(RivetError {
+                message,
+                kind: RivetErrorKind::Computation
+            })
+        } else {
+            for bc in 0..cbars.length {
+                let bcp = cbars.barcodes.offset(bc as isize);
+                let mut bars = Array2::zeros(((*bcp).length, 3));
+                for b in 0..(*bcp).length {
+                    let bp = (*bcp).bars.offset(b as isize);
+                    bars[[b, 0]] = (*bp).birth;
+                    bars[[b, 1]] = match (*bp).death {
+                        d if d.is_infinite() || d.is_nan() => 1e6, //f64::MAX,
+                        d => d
+                    };
+                    bars[[b, 2]] = (*bp).multiplicity as f64;
+                }
+                let angle = (*bcp).angle;
+                let offset = (*bcp).offset;
+                barcodes.push(BarCode { angle, offset, bars })
             }
-            let angle = (*bcp).angle;
-            let offset = (*bcp).offset;
-            barcodes.push(BarCode{angle, offset, bars})
+            free_barcodes_result(cbars);
+            Ok(barcodes)
         }
-        free_barcodes_result(cbars);
-        barcodes
     }
 }
 

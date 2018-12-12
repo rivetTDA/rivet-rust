@@ -67,7 +67,7 @@ pub struct Dimension {
 const DIMENSION_VERIFY: bool = false;
 
 impl Dimension {
-    fn new(lower_bound: R64, upper_bounds: Vec<R64>) -> Dimension {
+    pub fn new(lower_bound: R64, upper_bounds: Vec<R64>) -> Dimension {
         let dim = if upper_bounds.len() == 0 {
             Dimension {
                 lower_bound,
@@ -89,7 +89,7 @@ impl Dimension {
         dim
     }
 
-    fn from_f64s(lower_bound: f64, upper_bounds: Vec<f64>) -> Dimension {
+    pub fn from_f64s(lower_bound: f64, upper_bounds: &[f64]) -> Dimension {
         Dimension::new(r64(lower_bound), upper_bounds.iter().map(|&x| r64(x)).collect_vec())
     }
 
@@ -230,7 +230,7 @@ pub struct SplitMat {
 }
 
 pub enum SampleType {
-    AVERAGE,
+    MEAN,
     MIN,
     MAX
 }
@@ -258,6 +258,11 @@ impl SplitMat {
             }
         }
         SplitMat { mat, dimensions }
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        (self.dimensions[0].upper_bounds.len(),
+         self.dimensions[1].upper_bounds.len())
     }
 
     fn row(&self, length: R64) -> (DimensionQueryResult, Option<usize>) {
@@ -314,7 +319,7 @@ impl SplitMat {
     /// Returns a matrix with the same shape as the given template (the template should contain the
     /// dimensions of self for meaningful results), with values that are the weighted
     /// averages (or max, or min) of any values in self that fall in a cell of the template.
-    fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
+    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
         let merged = self.merge(template).expand();
         let mut result =
             Array2::zeros((template.dimensions[0].len(), template.dimensions[1].len()));
@@ -359,7 +364,7 @@ impl SplitMat {
                 |v| {
                     let it = v.into_iter();
                     match sample_type {
-                        SampleType::AVERAGE =>
+                        SampleType::MEAN =>
                             it.map(|e|r64(e.value as f64) * e.height * e.width).sum(),
                         SampleType::MAX =>
                             it.map(|e|r64(e.value as f64)).max().unwrap_or(r64(0.0)),
@@ -370,7 +375,7 @@ impl SplitMat {
             for col in 0..template.dimensions[1].len() {
                 let total = col_totals[col];
                 result[(row, col)] = match sample_type {
-                    SampleType::AVERAGE =>
+                    SampleType::MEAN =>
                         total / (result_rows_lens[row] * result_cols_lens[col]),
                     _ => total
                 }
@@ -505,7 +510,7 @@ impl SplitMat {
 //            println!("Created point from structurepoint");
         }
 
-        mat.map_inplace(|mut x| if x < &mut 0 { *x = 0 });
+        mat.map_inplace(|x| if x < &mut 0 { *x = 0 });
         Ok(SplitMat { mat, dimensions })
     }
 }
@@ -611,8 +616,8 @@ mod tests {
             [4, 5, 6],
             [7, 8, 9]]),
                                       vec![
-                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
-                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
+                                          Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
+                                          Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0])
                                       ],
         );
 
@@ -621,10 +626,10 @@ mod tests {
         split.add_row(r64(0.8));
         split.add_row(r64(1.5));
         assert_eq!(split.dimensions[0].upper_bounds,
-                   Dimension::from_f64s(0., vec![0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 1.5]).upper_bounds);
+                   Dimension::from_f64s(0., &vec![0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 1.5]).upper_bounds);
         split.add_col(r64(0.4));
         assert_eq!(split.dimensions[1].upper_bounds,
-                   Dimension::from_f64s(0., vec![0.25, 0.4, 0.5, 1.0]).upper_bounds);
+                   Dimension::from_f64s(0., &vec![0.25, 0.4, 0.5, 1.0]).upper_bounds);
 
         let expanded = split.expand();
 
@@ -645,8 +650,8 @@ mod tests {
             [4, 5, 6],
             [7, 8, 9]]),
                                       vec![
-                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
-                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
+                                          Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
+                                          Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0])
                                       ],
         );
 
@@ -667,17 +672,17 @@ mod tests {
             [4, 5, 6],
             [7, 8, 9]]),
                                       vec![
-                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
-                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
+                                          Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
+                                          Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0])
                                       ],
         );
 
-        let mut split2 = SplitMat::new(arr2(&[
+        let split2 = SplitMat::new(arr2(&[
             [1, 2],
             [3, 4]]),
                                        vec![
-                                           Dimension::from_f64s(0.2, vec![0.25, 0.5]),
-                                           Dimension::from_f64s(0.2, vec![0.25, 0.5])
+                                           Dimension::from_f64s(0.2, &vec![0.25, 0.5]),
+                                           Dimension::from_f64s(0.2, &vec![0.25, 0.5])
                                        ],
         );
 
