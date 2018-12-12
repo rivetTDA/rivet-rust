@@ -54,9 +54,13 @@ struct HashableR64 {
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-struct Dimension {
+pub struct Dimension {
+    /// The lower bound of this dimension
     lower_bound: R64,
+    /// The upper bound of this dimension
     upper_bounds: Vec<R64>,
+    /// A collection of all the indices (in the backing matrix of a SplitMat) that map to
+    /// each of the upper bounds (i.e. upper_indexes is always the same length as upper_bounds).
     upper_indexes: Vec<Option<usize>>,
 }
 
@@ -218,23 +222,38 @@ fn is_sorted<T:Ord>(thing: &[T]) -> bool {
     }
     true
 }
+
 #[derive(Eq, Default, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SplitMat {
     mat: Array2<i32>,
     dimensions: Vec<Dimension>,
 }
 
+pub enum SampleType {
+    AVERAGE,
+    MIN,
+    MAX
+}
+
 impl SplitMat {
-    fn new(mat: Array2<i32>, dimensions: Vec<Dimension>) -> SplitMat {
-        assert!(dimensions.len() == mat.shape().len(),
-                "number of dimensions does not equal array shape length");
+    pub fn constant(constant: i32, dimensions: Vec<Dimension>) -> SplitMat {
+        assert_eq!(dimensions.len(), 2, "Requires exactly 2 dimensions");
+        SplitMat::new(
+            Array2::from_elem((dimensions[0].len(), dimensions[1].len()), constant),
+            dimensions)
+    }
+
+    pub fn new(mat: Array2<i32>, dimensions: Vec<Dimension>) -> SplitMat {
+        assert_eq!(dimensions.len(), mat.shape().len(),
+                   "number of dimensions does not equal array shape length");
         for i in 0..mat.shape().len() {
             for uindex in &dimensions[i].upper_indexes {
                 if uindex.is_none() {
                     continue;
                 }
                 let uindex = uindex.unwrap();
-                assert!(uindex < mat.shape()[i], format!("In dimension {}, dimension index {} is too big for matrix dimension {}",
+                assert!(uindex < mat.shape()[i],
+                        format!("In dimension {}, dimension index {} is too big for matrix dimension {}",
                                                          i, uindex, mat.shape()[i]));
             }
         }
@@ -289,6 +308,75 @@ impl SplitMat {
             .map(|(x, y)| x.merge(y))
             .collect_vec();
         SplitMat::new(self.mat.clone(), left_dims)
+    }
+
+
+    /// Returns a matrix with the same shape as the given template (the template should contain the
+    /// dimensions of self for meaningful results), with values that are the weighted
+    /// averages (or max, or min) of any values in self that fall in a cell of the template.
+    fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
+        let merged = self.merge(template).expand();
+        let mut result =
+            Array2::zeros((template.dimensions[0].len(), template.dimensions[1].len()));
+        let mut merged_row = 0;
+        let merged_rows = &merged.dimensions[0];
+        let merged_cols = &merged.dimensions[1];
+        let merged_rows_lens = merged_rows.lengths();
+        let merged_cols_lens = merged_cols.lengths();
+        let result_rows_lens = template.dimensions[0].lengths();
+        let result_cols_lens = template.dimensions[1].lengths();
+        struct Entry {
+            width: R64,
+            height: R64,
+            value: i32
+        }
+        for row in 0..template.dimensions[0].len() {
+            // Skip rows in merged that can't be in this row in result
+            while (row == 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].lower_bound)
+                || (row > 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].upper_bounds[row - 1]) {
+                merged_row += 1;
+            }
+            let mut row_areas: Vec<Vec<Entry>> = Vec::with_capacity(merged_cols.len());
+            while merged_rows.upper_bounds[merged_row] <= template.dimensions[0].upper_bounds[row] {
+                let mut merged_col = 0;
+                for col in 0..template.dimensions[1].len() {
+                    // Skip cols in merged that can't be in this col in template
+                    while (col == 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].lower_bound)
+                        || (col > 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].upper_bounds[col - 1]) {
+                        merged_col += 1;
+                    }
+                    while merged_cols.upper_bounds[merged_col] <= template.dimensions[1].upper_bounds[col] {
+                        row_areas[col].push(
+                            Entry { width: merged_cols_lens[merged_col],
+                                            height: merged_rows_lens[merged_row],
+                                            value: merged.mat[(merged_row, merged_col)]
+                            });
+                        merged_col += 1;
+                    }
+                }
+            }
+            let col_totals: Vec<R64> = row_areas.into_iter().map(
+                |v| {
+                    let it = v.into_iter();
+                    match sample_type {
+                        SampleType::AVERAGE =>
+                            it.map(|e|r64(e.value as f64) * e.height * e.width).sum(),
+                        SampleType::MAX =>
+                            it.map(|e|r64(e.value as f64)).max().unwrap_or(r64(0.0)),
+                        SampleType::MIN =>
+                            it.map(|e|r64(e.value as f64)).min().unwrap_or(r64(0.0))
+                    }
+                }).collect_vec();
+            for col in 0..template.dimensions[1].len() {
+                let total = col_totals[col];
+                result[(row, col)] = match sample_type {
+                    SampleType::AVERAGE =>
+                        total / (result_rows_lens[row] * result_cols_lens[col]),
+                    _ => total
+                }
+            }
+        }
+        result
     }
 
     fn expand(&self) -> SplitMat {
@@ -510,109 +598,119 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
 
 
 #[cfg(test)]
-use ndarray::arr2;
+mod tests {
+    use ndarray::arr2;
+    use hilbert_distance::SplitMat;
+    use hilbert_distance::Dimension;
+    use noisy_float::types::r64;
 
-#[test]
-fn expand() {
-    let mut split = SplitMat::new(arr2(&[
-        [1, 2, 3],
-        [4, 5, 6],
-        [7, 8, 9]]),
-                                  vec![
-                                      Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
-                                      Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
-                                  ],
-    );
+    #[test]
+    fn expand() {
+        let mut split = SplitMat::new(arr2(&[
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9]]),
+                                      vec![
+                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
+                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
+                                      ],
+        );
 
-    split.add_row(r64(0.1));
-    split.add_row(r64(0.05));
-    split.add_row(r64(0.8));
-    split.add_row(r64(1.5));
-    assert_eq!(split.dimensions[0].upper_bounds,
-               Dimension::from_f64s(0., vec![0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 1.5]).upper_bounds);
-    split.add_col(r64(0.4));
-    assert_eq!(split.dimensions[1].upper_bounds,
-               Dimension::from_f64s(0., vec![0.25, 0.4, 0.5, 1.0]).upper_bounds);
+        split.add_row(r64(0.1));
+        split.add_row(r64(0.05));
+        split.add_row(r64(0.8));
+        split.add_row(r64(1.5));
+        assert_eq!(split.dimensions[0].upper_bounds,
+                   Dimension::from_f64s(0., vec![0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 1.5]).upper_bounds);
+        split.add_col(r64(0.4));
+        assert_eq!(split.dimensions[1].upper_bounds,
+                   Dimension::from_f64s(0., vec![0.25, 0.4, 0.5, 1.0]).upper_bounds);
 
-    let expanded = split.expand();
+        let expanded = split.expand();
 
-    assert_eq!(expanded.mat, arr2(
-        &[[1, 2, 2, 3],
-            [1, 2, 2, 3],
-            [1, 2, 2, 3],
-            [4, 5, 5, 6],
-            [7, 8, 8, 9],
-            [7, 8, 8, 9],
-            [0, 0, 0, 0]]));
-}
+        assert_eq!(expanded.mat, arr2(
+            &[[1, 2, 2, 3],
+                [1, 2, 2, 3],
+                [1, 2, 2, 3],
+                [4, 5, 5, 6],
+                [7, 8, 8, 9],
+                [7, 8, 8, 9],
+                [0, 0, 0, 0]]));
+    }
 
-#[test]
-fn distance() {
-    let mut split = SplitMat::new(arr2(&[
-        [1, 2, 3],
-        [4, 5, 6],
-        [7, 8, 9]]),
-                                  vec![
-                                      Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
-                                      Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
-                                  ],
-    );
+    #[test]
+    fn distance() {
+        let mut split = SplitMat::new(arr2(&[
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9]]),
+                                      vec![
+                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
+                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
+                                      ],
+        );
 
-    let mut split2 = split.clone();
+        let mut split2 = split.clone();
 
-    assert_eq!(split2.distance(&split), r64(0.));
-    assert_eq!(split2.distance(&split), split.distance(&split2));
+        assert_eq!(split2.distance(&split), r64(0.));
+        assert_eq!(split2.distance(&split), split.distance(&split2));
 
-    split2.mat[[0, 0]] = 3;
-    assert_eq!(split2.distance(&split), r64(2. * (0.25 * 0.25)));
-    assert_eq!(split2.distance(&split), split.distance(&split2));
-}
+        split2.mat[[0, 0]] = 3;
+        assert_eq!(split2.distance(&split), r64(2. * (0.25 * 0.25)));
+        assert_eq!(split2.distance(&split), split.distance(&split2));
+    }
 
-#[test]
-fn distance_overlapping() {
-    let mut split = SplitMat::new(arr2(&[
-        [1, 2, 3],
-        [4, 5, 6],
-        [7, 8, 9]]),
-                                  vec![
-                                      Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
-                                      Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
-                                  ],
-    );
+    #[test]
+    fn distance_overlapping() {
+        let mut split = SplitMat::new(arr2(&[
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9]]),
+                                      vec![
+                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0]),
+                                          Dimension::from_f64s(0., vec![0.25, 0.5, 1.0])
+                                      ],
+        );
 
-    let mut split2 = SplitMat::new(arr2(&[
-        [1, 2],
-        [3, 4]]),
-                                   vec![
-                                       Dimension::from_f64s(0.2, vec![0.25, 0.5]),
-                                       Dimension::from_f64s(0.2, vec![0.25, 0.5])
-                                   ],
-    );
+        let mut split2 = SplitMat::new(arr2(&[
+            [1, 2],
+            [3, 4]]),
+                                       vec![
+                                           Dimension::from_f64s(0.2, vec![0.25, 0.5]),
+                                           Dimension::from_f64s(0.2, vec![0.25, 0.5])
+                                       ],
+        );
 
-    println!("split.merge(&split2).expand()");
-    println!("{:?}", split.merge(&split2).expand());
+        println!("split.merge(&split2).expand()");
+        println!("{:?}", split.merge(&split2).expand());
 
-    println!("split2.merge(&split).expand()");
-    println!("{:?}", split2.merge(&split).expand());
+        println!("split2.merge(&split).expand()");
+        println!("{:?}", split2.merge(&split).expand());
 
-    let left_diff = split.merge(&split2).expand().mat - split2.merge(&split).expand().mat;
-    let right_diff = split2.merge(&split).expand().mat - split.merge(&split2).expand().mat;
-    assert_eq!(left_diff, -right_diff, "diffs");
+        let left_diff = split.merge(&split2).expand().mat - split2.merge(&split).expand().mat;
+        let right_diff = split2.merge(&split).expand().mat - split.merge(&split2).expand().mat;
+        assert_eq!(left_diff, -right_diff, "diffs");
 
-    let left_weighted = split.weighted_difference(&split2);
-    let right_weighted = split2.weighted_difference(&split);
-    assert_eq!(left_weighted.clone(), -(right_weighted.clone()), "weighted diffs");
+        let left_weighted = split.weighted_difference(&split2);
+        let right_weighted = split2.weighted_difference(&split);
+        assert_eq!(left_weighted.clone(), -(right_weighted.clone()), "weighted diffs");
 
-    let left_squared = &left_weighted * &left_weighted;
-    let right_squared = &right_weighted * &right_weighted;
-    assert_eq!(&left_squared, &right_squared, "squared");
+        let left_squared = &left_weighted * &left_weighted;
+        let right_squared = &right_weighted * &right_weighted;
+        assert_eq!(&left_squared, &right_squared, "squared");
 
-    let left_sum: f64 = left_squared.iter().map(|x| x.raw()).sum();
-    let right_sum: f64 = right_squared.iter().map(|x| x.raw()).sum();
-    assert_eq!(left_sum, right_sum, "sum");
+        let left_sum: f64 = left_squared.iter().map(|x| x.raw()).sum();
+        let right_sum: f64 = right_squared.iter().map(|x| x.raw()).sum();
+        assert_eq!(left_sum, right_sum, "sum");
 
-    assert_eq!(left_sum.sqrt(), right_sum.sqrt(), "sqrt");
+        assert_eq!(left_sum.sqrt(), right_sum.sqrt(), "sqrt");
 
-    assert_eq!(split2.distance(&split), r64(2.701316808521355), "exact value");
-    assert_eq!(split2.distance(&split), split.distance(&split2), "symmetry");
+        assert_eq!(split2.distance(&split), r64(2.701316808521355), "exact value");
+        assert_eq!(split2.distance(&split), split.distance(&split2), "symmetry");
+    }
+
+    #[test]
+    fn test_sample() {
+
+    }
 }
