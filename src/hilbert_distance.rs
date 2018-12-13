@@ -325,11 +325,15 @@ impl SplitMat {
             Array2::zeros((template.dimensions[0].len(), template.dimensions[1].len()));
         let mut merged_row = 0;
         let merged_rows = &merged.dimensions[0];
+        assert_ne!(merged_rows.len(), 0);
         let merged_cols = &merged.dimensions[1];
+        assert_ne!(merged_cols.len(), 0);
         let merged_rows_lens = merged_rows.lengths();
         let merged_cols_lens = merged_cols.lengths();
         let result_rows_lens = template.dimensions[0].lengths();
         let result_cols_lens = template.dimensions[1].lengths();
+
+        #[derive(Clone)]
         struct Entry {
             width: R64,
             height: R64,
@@ -341,8 +345,9 @@ impl SplitMat {
                 || (row > 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].upper_bounds[row - 1]) {
                 merged_row += 1;
             }
-            let mut row_areas: Vec<Vec<Entry>> = Vec::with_capacity(merged_cols.len());
-            while merged_rows.upper_bounds[merged_row] <= template.dimensions[0].upper_bounds[row] {
+            let mut row_areas: Vec<Vec<Entry>> = vec![Vec::new(); merged_cols.len()];
+            while merged_row < merged_rows.len()
+                && merged_rows.upper_bounds[merged_row] <= template.dimensions[0].upper_bounds[row] {
                 let mut merged_col = 0;
                 for col in 0..template.dimensions[1].len() {
                     // Skip cols in merged that can't be in this col in template
@@ -350,15 +355,18 @@ impl SplitMat {
                         || (col > 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].upper_bounds[col - 1]) {
                         merged_col += 1;
                     }
-                    while merged_cols.upper_bounds[merged_col] <= template.dimensions[1].upper_bounds[col] {
-                        row_areas[col].push(
-                            Entry { width: merged_cols_lens[merged_col],
-                                            height: merged_rows_lens[merged_row],
-                                            value: merged.mat[(merged_row, merged_col)]
-                            });
+                    while merged_col < merged_cols.len()
+                        && merged_cols.upper_bounds[merged_col] <= template.dimensions[1].upper_bounds[col] {
+                        let entry = Entry {
+                            width: merged_cols_lens[merged_col],
+                            height: merged_rows_lens[merged_row],
+                            value: merged.mat[(merged_row, merged_col)]
+                        };
+                        row_areas[col].push(entry);
                         merged_col += 1;
                     }
                 }
+                merged_row += 1;
             }
             let col_totals: Vec<R64> = row_areas.into_iter().map(
                 |v| {
