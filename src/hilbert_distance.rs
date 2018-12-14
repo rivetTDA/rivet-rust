@@ -18,7 +18,7 @@ fn rational_to_r64(ratio: &Rational64) -> R64 {
 enum DimensionQueryResult {
     Low,
     High,
-    In,
+    In(usize),
 }
 
 // Needed to use a HashSet with floats. https://stackoverflow.com/a/39639200/224186
@@ -64,6 +64,71 @@ pub struct Dimension {
     upper_indexes: Vec<Option<usize>>,
 }
 
+enum Interval {
+    Open(R64, R64),
+    Closed(R64, R64),
+    OpenClosed(R64, R64),
+    ClosedOpen(R64, R64)
+}
+
+enum OpenClosed {
+    Open,
+    Closed
+}
+
+impl Interval {
+    fn new(start: R64, start_included: OpenClosed, end: R64, end_included: OpenClosed) -> Option<Interval> {
+        use OpenClosed::*;
+        if start < end {
+            Some(match (start_included, end_included) {
+                case(Open, Open) => Interval::Open(start, end),
+                case(Closed, Closed) => Interval::Closed(start, end),
+                case(Open,Closed) => Interval::OpenClosed(start, end),
+                case(Closed, Open) => Interval::ClosedOpen(start, end)
+            })
+        } else {
+            None
+        }
+    }
+
+    fn end_types(&self) -> (OpenClosed, OpenClosed) {
+        match self {
+            case Interval::Open(_,_) => (OpenClosed::Open, OpenClosed::Open),
+            case Interval::Closed(_,_) => (OpenClosed::Closed, OpenClosed::Closed),
+            case Interval::OpenClosed(_,_) => (OpenClosed::Open, OpenClosed::Closed),
+            case Interval::ClosedOpen(_, _) => (OpenClosed::Closed, OpenClosed::Open)
+        }
+    }
+
+    fn intersection(&self, other: &Interval) -> Option<Interval> {
+        if self.start > other.end || other.start > self.end {
+            None
+        } else {
+            let start = std::cmp::max(self.start, other.start);
+            let end = std::cmp::min(self.end, other.end);
+            let (self_start_type, self_end_type) = self.end_types();
+            let (other_start_type, other_end_type) = other.end_types();
+            let start_type = if self.start != other.start {
+                OpenClosed::Closed
+            } else {
+                match (self_start_type, other_start_type) {
+                    case (OpenClosed::Closed, OpenClosed::Closed) => OpenClosed::Closed,
+                    _ => OpenClosed::Open
+                }
+            };
+            let end_type = if self.end != other.end {
+                OpenClosed::Closed
+            } else {
+                match (self_end_type, other_end_type) {
+                    case (OpenClosed::Closed, OpenClosed::Closed) => OpenClosed::Closed,
+                    _ => OpenClosed::Open
+                }
+            };
+            Some(Interval::new(start, start_type, end, end_type).unwrap())
+        }
+    }
+}
+
 const DIMENSION_VERIFY: bool = false;
 
 impl Dimension {
@@ -87,6 +152,10 @@ impl Dimension {
 //        println!("New verify {:?}", &dim);
         dim.verify();
         dim
+    }
+
+    pub upper_bound(&self) -> R64 {
+        self.upper_bounds.last().unwrap()
     }
 
     pub fn from_f64s(lower_bound: f64, upper_bounds: &[f64]) -> Dimension {
@@ -113,6 +182,15 @@ impl Dimension {
             lengths.push(bounds[i] - bounds[i - 1]);
         }
         lengths
+    }
+
+    fn intervals(&self) -> Vec<Interval> {
+        let mut results = Vec::with_capacity(self.upper_bounds.len());
+        results.push(Interval::Closed(self.lower_bound, self.upper_bounds[0]));
+        for i in 1..self.len() {
+            results.push(Interval::OpenClosed(self.upper_bounds[i-1], self.upper_bounds[i]));
+        }
+        results
     }
 
     fn len(&self) -> usize {
@@ -169,15 +247,15 @@ impl Dimension {
         bound == self.lower_bound || self.upper_bounds.contains(&bound)
     }
 
-    fn index(&self, value: R64) -> (DimensionQueryResult, Option<usize>) {
+    fn index(&self, value: R64) -> DimensionQueryResult {
         if value < self.lower_bound {
             (DimensionQueryResult::Low, None)
         } else if value > *self.upper_bounds.last().unwrap() {
             (DimensionQueryResult::High, None)
         } else {
             for (i, bound) in self.upper_bounds.iter().enumerate() {
-                if value < *bound {
-                    return (DimensionQueryResult::In, Some(i));
+                if value <= *bound {
+                    return DimensionQueryResult::In(i);
                 }
             }
             panic!("the impossible happened - value is neither less, greater, nor in the bounds collection");
@@ -223,6 +301,8 @@ fn is_sorted<T:Ord>(thing: &[T]) -> bool {
     true
 }
 
+/// A virtual matrix with both discrete and real-valued indices, and integer values. A SplitMat
+/// can be subdivided at any real-valued point on either axis.
 #[derive(Eq, Default, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SplitMat {
     mat: Array2<i32>,
@@ -235,6 +315,61 @@ pub enum SampleType {
     MAX
 }
 
+pub struct Rectangle {
+    d0: Interval,
+    d1: Interval
+}
+
+impl Rectangle {
+    pub fn new(d0: Interval, d1: Interval) -> Rectangle {
+        Rectangle { d0, d1 }
+    }
+
+    pub fn intersection(&self, other: &Rectangle) -> Option<Rectangle> {
+        let d0 = self.d0.intersection(&other.d0)?;
+        let d1 = self.d1.intersection(&other.d1)?;
+        Some(Rectangle {d0, d1})
+    }
+}
+
+//pub struct Rectangle {
+//    pub position: (R64, R64),
+//    pub size: (R64, R64)
+//}
+//
+//impl Rectangle {
+//    pub fn from_points(position: (R64, R64), end_position: (R64, R64)) -> Option<Rectangle> {
+//        let (s1, s2) = position;
+//        let (e1, e2) = end_position;
+//        if s2 < s1 || e2 < e1 {
+//            None
+//        } else {
+//            Some(
+//                Rectangle {
+//                    position,
+//                    size: (s2 - s1, e2 - e1)
+//                }
+//            )
+//        }
+//    }
+//}
+
+pub struct Region {
+    pub rectangle: Rectangle,
+    pub value: Option<R64>
+}
+
+impl Region {
+    pub fn new(rectangle: Rectangle, value: Option<R64>) -> Region {
+        Region {rectangle, value}
+    }
+
+    pub fn intersection(&self, other: &Rectangle) -> Option<Region> {
+        let rectangle = self.rectangle.intersection(&other)?;
+        Ok(Region{rectangle, value: self.value})
+    }
+}
+
 impl SplitMat {
     pub fn constant(constant: i32, dimensions: Vec<Dimension>) -> SplitMat {
         assert_eq!(dimensions.len(), 2, "Requires exactly 2 dimensions");
@@ -244,17 +379,19 @@ impl SplitMat {
     }
 
     pub fn new(mat: Array2<i32>, dimensions: Vec<Dimension>) -> SplitMat {
-        assert_eq!(dimensions.len(), mat.shape().len(),
-                   "number of dimensions does not equal array shape length");
-        for i in 0..mat.shape().len() {
-            for uindex in &dimensions[i].upper_indexes {
-                if uindex.is_none() {
-                    continue;
+        {
+            let shape = mat.shape();
+
+            assert_eq!(dimensions.len(), shape.len(),
+                       "number of dimensions does not equal array shape length");
+            for dimension_number in 0..shape.len() {
+                for upper_index in dimensions[dimension_number].upper_indexes.iter()
+                    .filter(|x| x.is_some())
+                    .map(|i| i.unwrap()) {
+                    assert!(upper_index < shape[dimension_number],
+                            format!("In dimension {}, dimension index {} is too big for matrix dimension {}",
+                                    dimension_number, upper_index, mat.shape()[dimension_number]))
                 }
-                let uindex = uindex.unwrap();
-                assert!(uindex < mat.shape()[i],
-                        format!("In dimension {}, dimension index {} is too big for matrix dimension {}",
-                                                         i, uindex, mat.shape()[i]));
             }
         }
         SplitMat { mat, dimensions }
@@ -265,18 +402,16 @@ impl SplitMat {
          self.dimensions[1].upper_bounds.len())
     }
 
-    fn row(&self, length: R64) -> (DimensionQueryResult, Option<usize>) {
+    fn row(&self, length: R64) -> DimensionQueryResult {
         self.dimensions[0].index(length)
     }
 
-    fn col(&self, length: R64) -> (DimensionQueryResult, Option<usize>) {
+    fn col(&self, length: R64) -> DimensionQueryResult {
         self.dimensions[1].index(length)
     }
 
-    fn index(self, coords: &[R64]) -> Vec<(DimensionQueryResult, Option<usize>)> {
-        coords.iter().enumerate()
-            .map(|(i, x)| self.dimensions[i].index(*x))
-            .collect_vec()
+    fn index(self, coords: (R64, R64)) -> (DimensionQueryResult, DimensionQueryResult) {
+        (self.dimensions[0].index(coords.0), self.dimensions[1].index(coords.1))
     }
 
     fn add_row(&mut self, first_length: R64) {
@@ -314,6 +449,63 @@ impl SplitMat {
             .collect_vec();
         SplitMat::new(self.mat.clone(), left_dims)
     }
+
+    fn value(&self, point: (R64, R64)) -> Option<i32> {
+        match self.index(point) {
+            (DimensionQueryResult::In(d0), DimensionQueryResult::In(d1)) =>
+                Some(self.mat[(self.dimension[0].upper_indexes[d0], self.dimension[1].upper_indexes[d1])]),
+            _ => None
+        }
+    }
+
+    fn regions(&self) -> Vec<Region> {
+        let mut results = Vec::new();
+        let d0_ints = self.dimensions[0].intervals();
+        let d1_ints = self.dimensions[1].intervals();
+        for (row_idx, row_interval) in d0_ints.into_iter().enumerate() {
+            for (col_idx, col_interval) in d1_ints.into_iter().enumerate() {
+                results.push(Region {
+                    rectangle: Rectangle {d0: row_interval, d1: col_interval},
+                    value: Some(r64(self.mat[(self.dimensions[0].upper_indexes[row_idx], self.dimensions[1].upper_indexes[col_idx])] as f64))
+                })
+            }
+        }
+        results
+    }
+
+//    fn regions(&self, rectangle: Rectangle) -> Vec<Region> {
+//        let start_real = rectangle.position;
+//        let end_real =(rectangle.position.0 + rectangle.size.0,
+//                       rectangle.position.1 + rectangle.size.1);
+//        let self_start_real = (self.dimensions[0].lower_bound, self.dimensions[1].lower_bound);
+//        let self_end_real = (self.dimensions[0].upper_bound(), self.dimensions[1].upper_bound());
+//        let start_discrete = self.index(start_real);
+//        let end_discrete = self.index(end_real);
+//        let mut results = Vec::new();
+//        use DimensionQueryResult::*;
+//        match start_discrete {
+//            (Low, Low) => {
+//                //Corner before all rows and columns
+//                results.push(Region {
+//                    rectangle: Rectangle::from_points(start_real, (self.dimensions[0].lower_bound, self.dimensions[1].lower_bound)).unwrap(),
+//                    value: None
+//                });
+//                //Band before all rows, not including corner we just did
+//                results.push(Region {
+//                    rectangle: Rectangle::from_points((start_real.0, self_start_real.1),
+//                                                      (self_start_real.0, std::cmp::min(self_end_real.1, end_real.1))).unwrap(),
+//                    value: None
+//                });
+//                //Band before all columns, not including corner
+//                results.push(Region {
+//                    rectangle: Rectangle::from_points((self_start_real.0, start_real.1),
+//                                                      (std::cmp::min(end_real.1, self_start_real.1), )).unwrap(),
+//                    value: None
+//                })
+//            }
+//        }
+//        results
+//    }
 
 
     /// Returns a matrix with the same shape as the given template (the template should contain the
@@ -613,6 +805,7 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
 #[cfg(test)]
 mod tests {
     use ndarray::arr2;
+    use hilbert_distance::SampleType;
     use hilbert_distance::SplitMat;
     use hilbert_distance::Dimension;
     use noisy_float::types::r64;
@@ -723,7 +916,75 @@ mod tests {
     }
 
     #[test]
-    fn test_sample() {
+    fn test_sample_min() {
+        let mut split = SplitMat::new(arr2(&[
+            [1, 2, 3],
+            [2, 4, 6]]),
+                                      vec![
+                                          Dimension::from_f64s(0., &vec![1.0, 2.0]),
+                                          Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]),
+                                      ],
+        );
 
+        let template = SplitMat::constant(0,
+                                          vec![
+                                              Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]),
+                                              Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]),
+                                          ]);
+        let min = split.sample(&template, SampleType::MIN);
+        assert_eq!(min, arr2(&[
+            [1.0, 1.0, 3.0],
+            [1.0, 1.0, 3.0],
+            [2.0, 2.0, 6.0]
+        ]).map(|&x| r64(x)));
+    }
+
+    #[test]
+    fn test_sample_max() {
+        let mut split = SplitMat::new(arr2(&[
+            [1, 2, 3],
+            [2, 4, 6]]),
+                                      vec![
+                                          Dimension::from_f64s(0., &vec![1.0, 2.0]),
+                                          Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]),
+                                      ],
+        );
+
+        let template = SplitMat::constant(0,
+                                          vec![
+                                              Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]),
+                                              Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]),
+                                          ]);
+        let max = split.sample(&template, SampleType::MAX);
+        assert_eq!(max, arr2(&[
+            [1.0, 3.0, 3.0],
+            [1.0, 3.0, 3.0],
+            [2.0, 6.0, 6.0]
+        ]).map(|&x| r64(x)));
+    }
+
+    #[test]
+    fn test_sample_mean() {
+        let mut split = SplitMat::new(arr2(&[
+            [1, 2, 3],
+            [2, 4, 6]]),
+                                      vec![
+                                          Dimension::from_f64s(0., &vec![1.0, 2.0]),
+                                          Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]),
+                                      ],
+        );
+
+        let template = SplitMat::constant(0,
+                                          vec![
+                                              Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]),
+                                              Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]),
+                                          ]);
+
+        let mean = split.sample(&template, SampleType::MEAN);
+        assert_eq!(mean, arr2(&[
+            [1.0, 2.0, 1.0],
+            [1.0, 2.0, 1.0],
+            [1.0, 1.875, 1.0]
+        ]).map(|&x|r64(x)));
     }
 }
