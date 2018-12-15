@@ -63,64 +63,75 @@ pub struct Dimension {
     /// each of the upper bounds (i.e. upper_indexes is always the same length as upper_bounds).
     upper_indexes: Vec<Option<usize>>,
 }
-
-enum Interval {
+#[derive(Debug, Clone)]
+pub enum Interval {
     Open(R64, R64),
     Closed(R64, R64),
     OpenClosed(R64, R64),
     ClosedOpen(R64, R64)
 }
 
-enum OpenClosed {
+#[derive(Debug, Clone)]
+pub enum OpenClosed {
     Open,
     Closed
 }
 
 impl Interval {
     fn new(start: R64, start_included: OpenClosed, end: R64, end_included: OpenClosed) -> Option<Interval> {
-        use OpenClosed::*;
+        use self::OpenClosed::*;
         if start < end {
             Some(match (start_included, end_included) {
-                case(Open, Open) => Interval::Open(start, end),
-                case(Closed, Closed) => Interval::Closed(start, end),
-                case(Open,Closed) => Interval::OpenClosed(start, end),
-                case(Closed, Open) => Interval::ClosedOpen(start, end)
+                (Open, Open) => Interval::Open(start, end),
+                (Closed, Closed) => Interval::Closed(start, end),
+                (Open,Closed) => Interval::OpenClosed(start, end),
+                (Closed, Open) => Interval::ClosedOpen(start, end)
             })
         } else {
             None
         }
     }
 
+    fn ends(&self) -> (R64, R64) {
+        match self {
+            Interval::Open(start,end) => (*start, *end),
+            Interval::Closed(start,end) => (*start, *end),
+            Interval::OpenClosed(start,end) => (*start, *end),
+            Interval::ClosedOpen(start, end) => (*start, *end)
+        }
+    }
     fn end_types(&self) -> (OpenClosed, OpenClosed) {
         match self {
-            case Interval::Open(_,_) => (OpenClosed::Open, OpenClosed::Open),
-            case Interval::Closed(_,_) => (OpenClosed::Closed, OpenClosed::Closed),
-            case Interval::OpenClosed(_,_) => (OpenClosed::Open, OpenClosed::Closed),
-            case Interval::ClosedOpen(_, _) => (OpenClosed::Closed, OpenClosed::Open)
+            Interval::Open(_,_) => (OpenClosed::Open, OpenClosed::Open),
+            Interval::Closed(_,_) => (OpenClosed::Closed, OpenClosed::Closed),
+            Interval::OpenClosed(_,_) => (OpenClosed::Open, OpenClosed::Closed),
+            Interval::ClosedOpen(_, _) => (OpenClosed::Closed, OpenClosed::Open)
         }
     }
 
     fn intersection(&self, other: &Interval) -> Option<Interval> {
-        if self.start > other.end || other.start > self.end {
+        let (self_start, self_end) = self.ends();
+        let (other_start, other_end) = other.ends();
+        if self_start > other_end || other_start > self_end {
             None
         } else {
-            let start = std::cmp::max(self.start, other.start);
-            let end = std::cmp::min(self.end, other.end);
+            let start = std::cmp::max(self_start, other_start);
+            let end = std::cmp::min(self_end, other_end);
             let (self_start_type, self_end_type) = self.end_types();
             let (other_start_type, other_end_type) = other.end_types();
-            let start_type = if self.start != other.start {
+            let start_type = if self_start != other_start {
                 OpenClosed::Closed
             } else {
                 match (self_start_type, other_start_type) {
-                    case (OpenClosed::Closed, OpenClosed::Closed) => OpenClosed::Closed,
+                    (OpenClosed::Closed, OpenClosed::Closed) => OpenClosed::Closed,
                     _ => OpenClosed::Open
                 }
             };
-            let end_type = if self.end != other.end {
+            let end_type = if self_end != other_end {
                 OpenClosed::Closed
             } else {
                 match (self_end_type, other_end_type) {
-                    case (OpenClosed::Closed, OpenClosed::Closed) => OpenClosed::Closed,
+                    (OpenClosed::Closed, OpenClosed::Closed) => OpenClosed::Closed,
                     _ => OpenClosed::Open
                 }
             };
@@ -154,8 +165,8 @@ impl Dimension {
         dim
     }
 
-    pub upper_bound(&self) -> R64 {
-        self.upper_bounds.last().unwrap()
+    pub fn upper_bound(&self) -> R64 {
+        *self.upper_bounds.last().unwrap()
     }
 
     pub fn from_f64s(lower_bound: f64, upper_bounds: &[f64]) -> Dimension {
@@ -249,9 +260,9 @@ impl Dimension {
 
     fn index(&self, value: R64) -> DimensionQueryResult {
         if value < self.lower_bound {
-            (DimensionQueryResult::Low, None)
+            DimensionQueryResult::Low
         } else if value > *self.upper_bounds.last().unwrap() {
-            (DimensionQueryResult::High, None)
+            DimensionQueryResult::High
         } else {
             for (i, bound) in self.upper_bounds.iter().enumerate() {
                 if value <= *bound {
@@ -314,7 +325,7 @@ pub enum SampleType {
     MIN,
     MAX
 }
-
+#[derive(Debug, Clone)]
 pub struct Rectangle {
     d0: Interval,
     d1: Interval
@@ -329,6 +340,12 @@ impl Rectangle {
         let d0 = self.d0.intersection(&other.d0)?;
         let d1 = self.d1.intersection(&other.d1)?;
         Some(Rectangle {d0, d1})
+    }
+
+    pub fn area(&self) -> R64 {
+        let (start0, end0) = self.d0.ends();
+        let (start1, end1) = self.d1.ends();
+        (end0 - start0) * (end1 - start1)
     }
 }
 
@@ -353,7 +370,7 @@ impl Rectangle {
 //        }
 //    }
 //}
-
+#[derive(Debug, Clone)]
 pub struct Region {
     pub rectangle: Rectangle,
     pub value: Option<R64>
@@ -365,8 +382,8 @@ impl Region {
     }
 
     pub fn intersection(&self, other: &Rectangle) -> Option<Region> {
-        let rectangle = self.rectangle.intersection(&other)?;
-        Ok(Region{rectangle, value: self.value})
+        self.rectangle.intersection(&other).map(|rect|
+            Region{rectangle:rect, value: self.value})
     }
 }
 
@@ -410,7 +427,7 @@ impl SplitMat {
         self.dimensions[1].index(length)
     }
 
-    fn index(self, coords: (R64, R64)) -> (DimensionQueryResult, DimensionQueryResult) {
+    fn index(&self, coords: (R64, R64)) -> (DimensionQueryResult, DimensionQueryResult) {
         (self.dimensions[0].index(coords.0), self.dimensions[1].index(coords.1))
     }
 
@@ -453,26 +470,88 @@ impl SplitMat {
     fn value(&self, point: (R64, R64)) -> Option<i32> {
         match self.index(point) {
             (DimensionQueryResult::In(d0), DimensionQueryResult::In(d1)) =>
-                Some(self.mat[(self.dimension[0].upper_indexes[d0], self.dimension[1].upper_indexes[d1])]),
+                Some(self.mat[(self.dimensions[0].upper_indexes[d0].unwrap(),
+                               self.dimensions[1].upper_indexes[d1].unwrap())]),
             _ => None
         }
     }
 
-    fn regions(&self) -> Vec<Region> {
-        let mut results = Vec::new();
+    fn regions(&self) -> Array2<Region> {
         let d0_ints = self.dimensions[0].intervals();
         let d1_ints = self.dimensions[1].intervals();
-        for (row_idx, row_interval) in d0_ints.into_iter().enumerate() {
-            for (col_idx, col_interval) in d1_ints.into_iter().enumerate() {
-                results.push(Region {
-                    rectangle: Rectangle {d0: row_interval, d1: col_interval},
-                    value: Some(r64(self.mat[(self.dimensions[0].upper_indexes[row_idx], self.dimensions[1].upper_indexes[col_idx])] as f64))
-                })
-            }
-        }
+        let results =
+            Array2::from_shape_fn((d0_ints.len(), d1_ints.len()), |(row_idx, col_idx)|{
+                Region {
+                    rectangle: Rectangle {d0: d0_ints[row_idx].clone(),
+                        d1: d1_ints[col_idx].clone()},
+                    value: Some(r64(
+                        self.mat[(self.dimensions[0].upper_indexes[row_idx].unwrap(),
+                                  self.dimensions[1].upper_indexes[col_idx].unwrap())] as f64))
+                }
+            });
         results
     }
 
+
+    /// Returns a matrix with the same shape as the given template (the template should contain the
+    /// dimensions of self for meaningful results), with values that are the weighted
+    /// averages (or max, or min) of any values in self that fall in a cell of the template.
+    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
+        let merged = self.merge(template).expand();
+        let regions = merged.regions();
+        let template_row_intervals = template.dimensions[0].intervals();
+        let template_col_intervals = template.dimensions[1].intervals();
+        let mut min_merged_rows_for_template_rows = vec![0; template.dimensions[0].len()];
+        let mut min_merged_cols_for_template_cols = vec![0; template.dimensions[1].len()];
+        for row in 1..template.dimensions[0].len() {
+            let row_interval = &template_row_intervals[row];
+            let (row_start, _) = row_interval.ends();
+            while merged.dimensions[0].upper_bounds[min_merged_rows_for_template_rows[row]] <= row_start {
+                min_merged_rows_for_template_rows[row] += 1
+            }
+        }
+        for col in 1..template.dimensions[1].len() {
+            let col_interval = &template_col_intervals[col];
+            let (col_start, _) = col_interval.ends();
+            while merged.dimensions[1].upper_bounds[min_merged_cols_for_template_cols[col]] <= col_start {
+                min_merged_cols_for_template_cols[col] += 1
+            }
+        }
+        let mut max_merged_rows_for_template_rows = min_merged_rows_for_template_rows.clone();
+        let mut max_merged_cols_for_template_cols = min_merged_cols_for_template_cols.clone();
+        for row in 0..template.dimensions[0].len() {
+            let row_interval = &template_row_intervals[row];
+            let (_, row_end) = row_interval.ends();
+            while merged.dimensions[0].upper_bounds[max_merged_rows_for_template_rows[row]] < row_end {
+                max_merged_rows_for_template_rows[row] += 1
+            }
+        }
+        for col in 0..template.dimensions[1].len() {
+            let col_interval = &template_col_intervals[col];
+            let (_k, col_end) = col_interval.ends();
+            while merged.dimensions[1].upper_bounds[max_merged_cols_for_template_cols[col]] < col_end {
+                max_merged_cols_for_template_cols[col] += 1
+            }
+        }
+
+
+        let result = Array2::from_shape_fn(template.shape(), |(row, col)| {
+            let cell_regions = regions.slice(
+                s![min_merged_rows_for_template_rows[row]..(max_merged_rows_for_template_rows[row] + 1),
+                        min_merged_cols_for_template_cols[col]..(max_merged_cols_for_template_cols[col] + 1)]).into_iter().collect_vec();
+            let template_rect = Rectangle::new(template_row_intervals[row].clone(), template_col_intervals[col].clone());
+            let clipped = cell_regions.iter().filter_map(|x|x.intersection(&template_rect));
+            match sample_type {
+                SampleType::MIN => clipped.filter_map(|x|x.value).min().or(Some(r64(0.0))).unwrap(),
+                SampleType::MAX => clipped.filter_map(|x|x.value).max().or(Some(r64(0.0))).unwrap(),
+                SampleType::MEAN => {
+                    let sum : R64 = clipped.filter_map(|x|x.value.map(|v: R64| v * x.rectangle.area())).sum();
+                    sum / template_rect.area()
+                }
+            }
+        });
+        result
+    }
 //    fn regions(&self, rectangle: Rectangle) -> Vec<Region> {
 //        let start_real = rectangle.position;
 //        let end_real =(rectangle.position.0 + rectangle.size.0,
@@ -508,81 +587,81 @@ impl SplitMat {
 //    }
 
 
-    /// Returns a matrix with the same shape as the given template (the template should contain the
-    /// dimensions of self for meaningful results), with values that are the weighted
-    /// averages (or max, or min) of any values in self that fall in a cell of the template.
-    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
-        let merged = self.merge(template).expand();
-        let mut result =
-            Array2::zeros((template.dimensions[0].len(), template.dimensions[1].len()));
-        let mut merged_row = 0;
-        let merged_rows = &merged.dimensions[0];
-        assert_ne!(merged_rows.len(), 0);
-        let merged_cols = &merged.dimensions[1];
-        assert_ne!(merged_cols.len(), 0);
-        let merged_rows_lens = merged_rows.lengths();
-        let merged_cols_lens = merged_cols.lengths();
-        let result_rows_lens = template.dimensions[0].lengths();
-        let result_cols_lens = template.dimensions[1].lengths();
-
-        #[derive(Clone)]
-        struct Entry {
-            width: R64,
-            height: R64,
-            value: i32
-        }
-        for row in 0..template.dimensions[0].len() {
-            // Skip rows in merged that can't be in this row in result
-            while (row == 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].lower_bound)
-                || (row > 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].upper_bounds[row - 1]) {
-                merged_row += 1;
-            }
-            let mut row_areas: Vec<Vec<Entry>> = vec![Vec::new(); merged_cols.len()];
-            while merged_row < merged_rows.len()
-                && merged_rows.upper_bounds[merged_row] <= template.dimensions[0].upper_bounds[row] {
-                let mut merged_col = 0;
-                for col in 0..template.dimensions[1].len() {
-                    // Skip cols in merged that can't be in this col in template
-                    while (col == 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].lower_bound)
-                        || (col > 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].upper_bounds[col - 1]) {
-                        merged_col += 1;
-                    }
-                    while merged_col < merged_cols.len()
-                        && merged_cols.upper_bounds[merged_col] <= template.dimensions[1].upper_bounds[col] {
-                        let entry = Entry {
-                            width: merged_cols_lens[merged_col],
-                            height: merged_rows_lens[merged_row],
-                            value: merged.mat[(merged_row, merged_col)]
-                        };
-                        row_areas[col].push(entry);
-                        merged_col += 1;
-                    }
-                }
-                merged_row += 1;
-            }
-            let col_totals: Vec<R64> = row_areas.into_iter().map(
-                |v| {
-                    let it = v.into_iter();
-                    match sample_type {
-                        SampleType::MEAN =>
-                            it.map(|e|r64(e.value as f64) * e.height * e.width).sum(),
-                        SampleType::MAX =>
-                            it.map(|e|r64(e.value as f64)).max().unwrap_or(r64(0.0)),
-                        SampleType::MIN =>
-                            it.map(|e|r64(e.value as f64)).min().unwrap_or(r64(0.0))
-                    }
-                }).collect_vec();
-            for col in 0..template.dimensions[1].len() {
-                let total = col_totals[col];
-                result[(row, col)] = match sample_type {
-                    SampleType::MEAN =>
-                        total / (result_rows_lens[row] * result_cols_lens[col]),
-                    _ => total
-                }
-            }
-        }
-        result
-    }
+//    /// Returns a matrix with the same shape as the given template (the template should contain the
+//    /// dimensions of self for meaningful results), with values that are the weighted
+//    /// averages (or max, or min) of any values in self that fall in a cell of the template.
+//    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
+//        let merged = self.merge(template).expand();
+//        let mut result =
+//            Array2::zeros((template.dimensions[0].len(), template.dimensions[1].len()));
+//        let mut merged_row = 0;
+//        let merged_rows = &merged.dimensions[0];
+//        assert_ne!(merged_rows.len(), 0);
+//        let merged_cols = &merged.dimensions[1];
+//        assert_ne!(merged_cols.len(), 0);
+//        let merged_rows_lens = merged_rows.lengths();
+//        let merged_cols_lens = merged_cols.lengths();
+//        let result_rows_lens = template.dimensions[0].lengths();
+//        let result_cols_lens = template.dimensions[1].lengths();
+//
+//        #[derive(Clone)]
+//        struct Entry {
+//            width: R64,
+//            height: R64,
+//            value: i32
+//        }
+//        for row in 0..template.dimensions[0].len() {
+//            // Skip rows in merged that can't be in this row in result
+//            while (row == 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].lower_bound)
+//                || (row > 0 && merged_rows.upper_bounds[merged_row] < template.dimensions[0].upper_bounds[row - 1]) {
+//                merged_row += 1;
+//            }
+//            let mut row_areas: Vec<Vec<Entry>> = vec![Vec::new(); merged_cols.len()];
+//            while merged_row < merged_rows.len()
+//                && merged_rows.upper_bounds[merged_row] <= template.dimensions[0].upper_bounds[row] {
+//                let mut merged_col = 0;
+//                for col in 0..template.dimensions[1].len() {
+//                    // Skip cols in merged that can't be in this col in template
+//                    while (col == 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].lower_bound)
+//                        || (col > 0 && merged_cols.upper_bounds[merged_col] < template.dimensions[1].upper_bounds[col - 1]) {
+//                        merged_col += 1;
+//                    }
+//                    while merged_col < merged_cols.len()
+//                        && merged_cols.upper_bounds[merged_col] <= template.dimensions[1].upper_bounds[col] {
+//                        let entry = Entry {
+//                            width: merged_cols_lens[merged_col],
+//                            height: merged_rows_lens[merged_row],
+//                            value: merged.mat[(merged_row, merged_col)]
+//                        };
+//                        row_areas[col].push(entry);
+//                        merged_col += 1;
+//                    }
+//                }
+//                merged_row += 1;
+//            }
+//            let col_totals: Vec<R64> = row_areas.into_iter().map(
+//                |v| {
+//                    let it = v.into_iter();
+//                    match sample_type {
+//                        SampleType::MEAN =>
+//                            it.map(|e|r64(e.value as f64) * e.height * e.width).sum(),
+//                        SampleType::MAX =>
+//                            it.map(|e|r64(e.value as f64)).max().unwrap_or(r64(0.0)),
+//                        SampleType::MIN =>
+//                            it.map(|e|r64(e.value as f64)).min().unwrap_or(r64(0.0))
+//                    }
+//                }).collect_vec();
+//            for col in 0..template.dimensions[1].len() {
+//                let total = col_totals[col];
+//                result[(row, col)] = match sample_type {
+//                    SampleType::MEAN =>
+//                        total / (result_rows_lens[row] * result_cols_lens[col]),
+//                    _ => total
+//                }
+//            }
+//        }
+//        result
+//    }
 
     fn expand(&self) -> SplitMat {
         let mut vec = Vec::with_capacity(self.dimensions.iter().map(|x| x.len()).product());
