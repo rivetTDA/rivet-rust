@@ -1012,9 +1012,9 @@ mod tests {
                                           ]);
         let min = split.sample(&template, SampleType::MIN);
         assert_eq!(min, arr2(&[
-            [1.0, 1.0, 3.0],
-            [1.0, 1.0, 3.0],
-            [2.0, 2.0, 6.0]
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0]
         ]).map(|&x| r64(x)));
     }
 
@@ -1060,10 +1060,13 @@ mod tests {
                                           ]);
 
         let mean = split.sample(&template, SampleType::MEAN);
-        assert_eq!(mean, arr2(&[
-            [1.0, 2.0, 1.0],
-            [1.0, 2.0, 1.0],
-            [1.0, 1.875, 1.0]
-        ]).map(|&x|r64(x)));
+        let areas = template.regions().map(|r|r.rectangle.area());
+        let values = arr2(&[
+            [1.0 * 0.5 * 0.5,   1.0 * 0.5 * 0.5 + 2.0 * 0.5 * 1.0 + 3.0 * 0.5 * 0.5,  3.0 * 0.5 * 0.5],
+            [1.0 * 0.5 * 0.5,   1.0 * 0.5 * 0.5 + 2.0 * 0.5 * 1.0 + 3.0 * 0.5 * 0.5,  3.0 * 0.5 * 0.5],
+            [2.0 * 1.0 * 0.5,   2.0 * 1.0 * 0.5 + 4.0 * 1.0 * 1.0 + 6.0 * 1.0 * 0.5,  6.0 * 1.0 * 0.5]
+        ]).map(|&x|r64(x));
+        let expected = &values / &areas;
+        assert_eq!(expected, mean);
     }
 }
