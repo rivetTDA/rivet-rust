@@ -1,17 +1,19 @@
+use hera;
+use ndarray::{Array1, Zip};
 use rivet;
 use rivet::RivetError;
 use std::cmp;
-use hera;
-use ndarray::{Array1, Zip};
 
 fn find_offset(slope: f64, point: (f64, f64)) -> f64 {
-    if slope == 90.0 { return -point.0; }
+    if slope == 90.0 {
+        return -point.0;
+    }
 
     let m = slope.to_radians().tan();
     let b = point.1 - point.0 * m;
     let x_minimizer = -1.0 * (point.1 * m - point.0 * m.powi(2)) / (1.0 + m.powi(2));
     let y_minimizer = m * x_minimizer + b;
-    let unsigned_dist : f64 = (x_minimizer.powi(2) + y_minimizer.powi(2)).sqrt();
+    let unsigned_dist: f64 = (x_minimizer.powi(2) + y_minimizer.powi(2)).sqrt();
     if b > 0.0 {
         unsigned_dist
     } else {
@@ -19,11 +21,12 @@ fn find_offset(slope: f64, point: (f64, f64)) -> f64 {
     }
 }
 
-fn generate_lines(grid_size: u32,
-                  upper_left: (f64, f64),
-                  lower_right: (f64, f64)) -> Vec<(f64, f64)>{
-
-    let mut lines:Vec<(f64, f64)> = Vec::new();
+fn generate_lines(
+    grid_size: u32,
+    upper_left: (f64, f64),
+    lower_right: (f64, f64),
+) -> Vec<(f64, f64)> {
+    let mut lines: Vec<(f64, f64)> = Vec::new();
     for i in 0..grid_size {
         let slope = 90.0 * (i as f64 + 1.0) / (grid_size as f64 + 1.0);
         let ul_offset = find_offset(slope, upper_left);
@@ -32,7 +35,8 @@ fn generate_lines(grid_size: u32,
             lines.push((slope, ul_offset - lr_offset));
         } else {
             for j in 0..grid_size {
-                let offset = lr_offset + j as f64 * (ul_offset - lr_offset) / (grid_size as f64 - 1.0);
+                let offset =
+                    lr_offset + j as f64 * (ul_offset - lr_offset) / (grid_size as f64 - 1.0);
                 lines.push((slope, offset as f64));
             }
         }
@@ -42,18 +46,22 @@ fn generate_lines(grid_size: u32,
 
 pub struct MatchResult {
     pub distance: f64,
-    pub error_count: usize
+    pub error_count: usize,
 }
 
-pub fn match_dist(multi_bars1: &[rivet::BarCode],
-                  multi_bars2: &[rivet::BarCode],
-                  fixed_bounds: &rivet::Bounds,
-                  lines: &[(f64, f64)],
-                  normalize: bool
-                ) -> MatchResult {
+pub fn match_dist(
+    multi_bars1: &[rivet::BarCode],
+    multi_bars2: &[rivet::BarCode],
+    fixed_bounds: &rivet::Bounds,
+    lines: &[(f64, f64)],
+    normalize: bool,
+) -> MatchResult {
     if fixed_bounds.is_degenerate() {
-        MatchResult { distance: hera::bottleneck_distance(&multi_bars1[0].bars, &multi_bars2[0].bars).expect("Couldn't calculate distance"),
-                        error_count: 0}
+        MatchResult {
+            distance: hera::bottleneck_distance(&multi_bars1[0].bars, &multi_bars2[0].bars)
+                .expect("Couldn't calculate distance"),
+            error_count: 0,
+        }
     } else {
         let mut raw_distances: Array1<f64> = Array1::<f64>::zeros(lines.len());
         for i in 0..lines.len() {
@@ -86,9 +94,9 @@ pub fn match_dist(multi_bars1: &[rivet::BarCode],
         //    else:
         //    bottleneck_stretch = 1
         let bottleneck_stretch: Array1<f64> = if normalize {
-            let stretch =
-                m.map(|t| ((t / delta_y).powi(2)
-                    + (1.0 / delta_x).powi(2) / (t.powi(2) + 1.0)).sqrt());
+            let stretch = m.map(|t| {
+                ((t / delta_y).powi(2) + (1.0 / delta_x).powi(2) / (t.powi(2) + 1.0)).sqrt()
+            });
             stretch
         } else {
             Array1::<f64>::from_elem(m.len(), 1.0)
@@ -96,14 +104,22 @@ pub fn match_dist(multi_bars1: &[rivet::BarCode],
 
         //    m_dist = np.max(w * raw_distance * bottleneck_stretch)
         //    return m_dist
-        let m_dist: f64 = *((w * raw_distances * bottleneck_stretch).iter().max_by(
-            |f1, f2| {
-                f1.partial_cmp(f2).unwrap_or(cmp::Ordering::Equal)
-            }).unwrap());
-        MatchResult { distance: m_dist, error_count: failures }
+        let m_dist: f64 = *((w * raw_distances * bottleneck_stretch)
+            .iter()
+            .max_by(|f1, f2| f1.partial_cmp(f2).unwrap_or(cmp::Ordering::Equal))
+            .unwrap());
+        MatchResult {
+            distance: m_dist,
+            error_count: failures,
+        }
     }
 }
-pub fn matching_distance(lhs: &[u8], rhs: &[u8], grid_size: u32, normalize: bool) -> Result<MatchResult, RivetError> {
+pub fn matching_distance(
+    lhs: &[u8],
+    rhs: &[u8],
+    grid_size: u32,
+    normalize: bool,
+) -> Result<MatchResult, RivetError> {
     let comp1 = rivet::parse(lhs)?;
     let comp2 = rivet::parse(rhs)?;
     //    # First, use fixed_bounds to set the upper right corner and lower-left
@@ -119,24 +135,33 @@ pub fn matching_distance(lhs: &[u8], rhs: &[u8], grid_size: u32, normalize: bool
     //    # next, for each of the two 2-D persistence modules, get the barcode
     //    # associated to the list of lines.
     let multi_bars1 = rivet::barcodes(&comp1, &lines)?;
-//    println!("bars1: {:?}", multi_bars1);
+    //    println!("bars1: {:?}", multi_bars1);
     let multi_bars2 = rivet::barcodes(&comp2, &lines)?;
-//    println!("bars2: {:?}", multi_bars2);
-//    # first compute the unweighted distance between the pairs
-    Ok(match_dist(multi_bars1.as_ref(), multi_bars2.as_ref(), &fixed_bounds, lines.as_ref(), normalize))
+    //    println!("bars2: {:?}", multi_bars2);
+    //    # first compute the unweighted distance between the pairs
+    Ok(match_dist(
+        multi_bars1.as_ref(),
+        multi_bars2.as_ref(),
+        &fixed_bounds,
+        lines.as_ref(),
+        normalize,
+    ))
 }
 
 fn recip(arr: &Array1<f64>) -> Array1<f64> {
-    arr.map(|x:&f64|
-            if x.partial_cmp(&0.0f64)
-                .unwrap_or(cmp::Ordering::Equal) == cmp::Ordering::Equal {0.0}
-            else {1.0/x})
+    arr.map(|x: &f64| {
+        if x.partial_cmp(&0.0f64).unwrap_or(cmp::Ordering::Equal) == cmp::Ordering::Equal {
+            0.0
+        } else {
+            1.0 / x
+        }
+    })
 }
 
 fn maximum(arr: &Array1<f64>, arr2: &Array1<f64>) -> Array1<f64> {
     let mut res = Array1::<f64>::zeros(arr.len());
 
-    Zip::from(&mut res).and(arr).and(arr2).apply(|q, &m, &r|{
+    Zip::from(&mut res).and(arr).and(arr2).apply(|q, &m, &r| {
         *q = f64::max(m, r);
     });
 
@@ -162,9 +187,9 @@ fn calculate_weight(m: &Array1<f64>, normalize: bool, delta_x: f64, delta_y: f64
         m * delta_x / delta_y
     } else {
         m.clone() // since other branch produces a new ArrayBase (not a ref),
-        // we must in this one as well
+                  // we must in this one as well
     };
     let q = maximum(&effective_m, &recip(&effective_m));
-    let w = (1.0 / (1.0 + q.map(|x|x.powi(2)))).map(|x|x.sqrt());
+    let w = (1.0 / (1.0 + q.map(|x| x.powi(2)))).map(|x| x.sqrt());
     w
 }

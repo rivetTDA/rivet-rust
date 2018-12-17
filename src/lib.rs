@@ -1,12 +1,12 @@
 // #![feature(alloc_system, global_allocator, allocator_api, try_trait, box_syntax, use_extern_macros)]
 #[macro_use]
 extern crate ndarray;
-extern crate libc;
-extern crate num_traits;
-extern crate num_rational;
-extern crate rand;
 extern crate csv;
+extern crate libc;
 extern crate noisy_float;
+extern crate num_rational;
+extern crate num_traits;
+extern crate rand;
 // extern crate time;
 extern crate num_iter;
 
@@ -25,12 +25,12 @@ extern crate itertools;
 extern crate flexi_logger;
 #[macro_use]
 extern crate log;
-extern crate serde;
 extern crate core;
+extern crate serde;
 
-pub mod rivet;
-#[cfg(feature="hera")]
+#[cfg(feature = "hera")]
 pub mod hera;
-#[cfg(feature="hera")]
-pub mod matching_distance;
 pub mod hilbert_distance;
+#[cfg(feature = "hera")]
+pub mod matching_distance;
+pub mod rivet;

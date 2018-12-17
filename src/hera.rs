@@ -3,14 +3,16 @@ use ndarray::Array2;
 enum PointSet {}
 
 #[link(name = "bottleneck")]
-extern {
+extern "C" {
     fn pointset_new() -> *mut PointSet;
     fn pointset_delete(pointset: *mut PointSet) -> ();
     fn pointset_insert(pointset: *mut PointSet, x: f64, y: f64);
-    fn distance(pointset1: *mut PointSet,
-                    pointset2: *mut PointSet,
-                    approx_epsilon: f64,
-                    result: &mut f64) -> i32;
+    fn distance(
+        pointset1: *mut PointSet,
+        pointset2: *mut PointSet,
+        approx_epsilon: f64,
+        result: &mut f64,
+    ) -> i32;
 }
 
 impl Drop for PointSet {
@@ -23,7 +25,6 @@ impl Drop for PointSet {
 }
 
 pub fn bottleneck_distance(lhs: &Array2<f64>, rhs: &Array2<f64>) -> Option<f64> {
-
     let bc1_len = lhs.shape()[0];
     let bc2_len = rhs.shape()[0];
 
@@ -31,16 +32,16 @@ pub fn bottleneck_distance(lhs: &Array2<f64>, rhs: &Array2<f64>) -> Option<f64> 
         let mut dist: f64 = 0.0;
         if bc1_len == 0 && bc2_len == 0 {
             //Do nothing, 0.0f64 is fine.
-//        } else if bc1_len == 0 {
-//            //                ps2.iter().map(|x| (x.1 - x.0))
-//            //                    .max_by(|x, y| x.partial_cmp(y)
-//            //                        .unwrap_or(cmp::Ordering::Equal))
-//            //                    .unwrap()
-//        } else if bc2_len == 0 {
-//            //                ps1.iter().map(|x| (x.1 - x.0))
-//            //                    .max_by(|x, y| x.partial_cmp(y)
-//            //                        .unwrap_or(cmp::Ordering::Equal))
-//            //                    .unwrap()
+            //        } else if bc1_len == 0 {
+            //            //                ps2.iter().map(|x| (x.1 - x.0))
+            //            //                    .max_by(|x, y| x.partial_cmp(y)
+            //            //                        .unwrap_or(cmp::Ordering::Equal))
+            //            //                    .unwrap()
+            //        } else if bc2_len == 0 {
+            //            //                ps1.iter().map(|x| (x.1 - x.0))
+            //            //                    .max_by(|x, y| x.partial_cmp(y)
+            //            //                        .unwrap_or(cmp::Ordering::Equal))
+            //            //                    .unwrap()
         } else {
             let set1 = pointset_new();
             let set2 = pointset_new();
@@ -64,7 +65,7 @@ pub fn bottleneck_distance(lhs: &Array2<f64>, rhs: &Array2<f64>) -> Option<f64> 
                     }
                 }
             }
-            let res  = distance(set1, set2, 0.001, &mut dist);
+            let res = distance(set1, set2, 0.001, &mut dist);
             pointset_delete(set1);
             pointset_delete(set2);
             if res != 0 {

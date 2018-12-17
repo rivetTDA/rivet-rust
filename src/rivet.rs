@@ -1,16 +1,16 @@
 use libc::{c_void, size_t};
 use ndarray::Array2;
-use std::f64;
 use num_rational::Rational64;
-use std::os::raw::c_char;
+use std::f64;
 use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::ptr;
 
 #[repr(C)]
 struct CBar {
     birth: f64,
     death: f64,
-    multiplicity: u32
+    multiplicity: u32,
 }
 
 #[repr(C)]
@@ -18,7 +18,7 @@ struct CBarCode {
     bars: *const CBar,
     length: size_t,
     angle: f64,
-    offset: f64
+    offset: f64,
 }
 
 #[repr(C)]
@@ -26,11 +26,10 @@ struct CBarCodesResult {
     pub barcodes: *const CBarCode,
     pub length: size_t,
     pub error: *const c_char,
-    pub error_length: size_t
-//    pub x_low: f64,
-//    pub y_low: f64,
-//    pub x_high: f64,
-//    pub y_high: f64
+    pub error_length: size_t, //    pub x_low: f64,
+                              //    pub y_low: f64,
+                              //    pub x_high: f64,
+                              //    pub y_high: f64
 }
 
 #[repr(C)]
@@ -39,13 +38,13 @@ struct CStructurePoint {
     pub y: u32,
     pub betti_0: u32,
     pub betti_1: u32,
-    pub betti_2: u32
+    pub betti_2: u32,
 }
 
 #[repr(C)]
 struct CRatio {
     pub nom: i64,
-    pub denom: i64
+    pub denom: i64,
 }
 
 #[repr(C)]
@@ -53,14 +52,14 @@ struct CExactGrades {
     pub x_grades: *const CRatio,
     pub x_length: size_t,
     pub y_grades: *const CRatio,
-    pub y_length: size_t
+    pub y_length: size_t,
 }
 
 #[repr(C)]
 struct CStructurePoints {
     pub grades: *const CExactGrades,
     pub points: *const CStructurePoint,
-    pub length: size_t
+    pub length: size_t,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -69,22 +68,22 @@ pub struct StructurePoint {
     pub y: u32,
     pub betti_0: u32,
     pub betti_1: u32,
-    pub betti_2: u32
+    pub betti_2: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct BettiStructure {
     pub x_grades: Vec<Rational64>,
     pub y_grades: Vec<Rational64>,
-    pub points: Vec<StructurePoint>
+    pub points: Vec<StructurePoint>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Bounds  {
+pub struct Bounds {
     pub x_low: f64,
     pub y_low: f64,
     pub x_high: f64,
-    pub y_high: f64
+    pub y_high: f64,
 }
 
 impl Bounds {
@@ -106,24 +105,26 @@ struct ArrangementBounds {
     x_low: f64,
     y_low: f64,
     x_high: f64,
-    y_high: f64
+    y_high: f64,
 }
 
 #[repr(C)]
 struct RivetComputationResult {
     computation: *mut RivetArrangement,
     error: *const c_char,
-    error_length: size_t
+    error_length: size_t,
 }
 
 #[link(name = "rivet")]
-extern {
+extern "C" {
     fn read_rivet_computation(bytes: *const u8, length: size_t) -> RivetComputationResult;
     fn bounds_from_computation(computation: *mut RivetArrangement) -> ArrangementBounds;
-    fn barcodes_from_computation(computation: *mut RivetArrangement,
-                           angles: *const f64,
-                           offsets: *const f64,
-                           query_length: size_t) -> CBarCodesResult;
+    fn barcodes_from_computation(
+        computation: *mut RivetArrangement,
+        angles: *const f64,
+        offsets: *const f64,
+        query_length: size_t,
+    ) -> CBarCodesResult;
     fn structure_from_computation(computation: *const RivetArrangement) -> *mut CStructurePoints;
 
     fn free_barcodes_result(result: CBarCodesResult) -> c_void;
@@ -134,16 +135,16 @@ extern {
 enum RivetArrangement {}
 
 pub struct ComputationResult {
-    arr: *mut RivetArrangement
+    arr: *mut RivetArrangement,
 }
 
 impl Drop for ComputationResult {
     fn drop(&mut self) {
         unsafe {
-            free_rivet_computation_result(RivetComputationResult{
+            free_rivet_computation_result(RivetComputationResult {
                 computation: self.arr,
                 error: ptr::null(),
-                error_length: 0
+                error_length: 0,
             });
         }
     }
@@ -153,37 +154,40 @@ impl Drop for ComputationResult {
 pub enum RivetErrorKind {
     InputValidation,
     IO,
-    Computation
+    Computation,
 }
 
 #[derive(Debug)]
 pub struct RivetError {
     message: String,
-    kind: RivetErrorKind
+    kind: RivetErrorKind,
 }
 
-pub fn parse(bytes: &[u8]) -> Result<ComputationResult,RivetError> {
+pub fn parse(bytes: &[u8]) -> Result<ComputationResult, RivetError> {
     if bytes.len() == 0 {
         Err(RivetError {
             message: "Byte array must have non-zero length".to_string(),
-            kind: RivetErrorKind::InputValidation
+            kind: RivetErrorKind::InputValidation,
         })
     } else {
-        let rivet_comp = unsafe {
-            read_rivet_computation(bytes.as_ptr(), bytes.len())
-        };
+        let rivet_comp = unsafe { read_rivet_computation(bytes.as_ptr(), bytes.len()) };
         if !rivet_comp.error.is_null() {
             let message = unsafe { CStr::from_ptr(rivet_comp.error) }
-                .to_owned().to_str().expect("Could not convert C string").to_string();
+                .to_owned()
+                .to_str()
+                .expect("Could not convert C string")
+                .to_string();
             unsafe {
                 free_rivet_computation_result(rivet_comp);
             }
             Err(RivetError {
                 message: format!("Error while reading computation: {}", message),
-                kind: RivetErrorKind::IO
+                kind: RivetErrorKind::IO,
             })
         } else {
-            Ok(ComputationResult { arr: rivet_comp.computation })
+            Ok(ComputationResult {
+                arr: rivet_comp.computation,
+            })
         }
     }
 }
@@ -193,32 +197,38 @@ pub fn bounds(computation: &ComputationResult) -> Bounds {
         let res = bounds_from_computation(computation.arr);
 
         Bounds {
-
             x_low: res.x_low,
             y_low: res.y_low,
             x_high: res.x_high,
-            y_high: res.y_high
+            y_high: res.y_high,
         }
     }
 }
 
-pub fn barcodes(computation: &ComputationResult, angle_offsets: &[(f64, f64)])
-    -> Result<Vec<BarCode>,RivetError> {
-    let angles: Vec<f64> = angle_offsets.iter().map(|p|{p.0}).collect();
-    let offsets: Vec<f64> = angle_offsets.iter().map(|p|{p.1}).collect();
-    let mut barcodes : Vec<BarCode> = Vec::new();
+pub fn barcodes(
+    computation: &ComputationResult,
+    angle_offsets: &[(f64, f64)],
+) -> Result<Vec<BarCode>, RivetError> {
+    let angles: Vec<f64> = angle_offsets.iter().map(|p| p.0).collect();
+    let offsets: Vec<f64> = angle_offsets.iter().map(|p| p.1).collect();
+    let mut barcodes: Vec<BarCode> = Vec::new();
     unsafe {
-        let cbars = barcodes_from_computation(computation.arr,
-                                              angles.as_ptr(),
-                                                offsets.as_ptr(),
-                                              angle_offsets.len());
+        let cbars = barcodes_from_computation(
+            computation.arr,
+            angles.as_ptr(),
+            offsets.as_ptr(),
+            angle_offsets.len(),
+        );
         if !cbars.error.is_null() {
             let message = CStr::from_ptr(cbars.error)
-                .to_owned().to_str().expect("Could not convert C string").to_string();
+                .to_owned()
+                .to_str()
+                .expect("Could not convert C string")
+                .to_string();
             free_barcodes_result(cbars);
             Err(RivetError {
                 message,
-                kind: RivetErrorKind::Computation
+                kind: RivetErrorKind::Computation,
             })
         } else {
             for bc in 0..cbars.length {
@@ -229,13 +239,17 @@ pub fn barcodes(computation: &ComputationResult, angle_offsets: &[(f64, f64)])
                     bars[[b, 0]] = (*bp).birth;
                     bars[[b, 1]] = match (*bp).death {
                         d if d.is_infinite() || d.is_nan() => 1e6, //f64::MAX,
-                        d => d
+                        d => d,
                     };
                     bars[[b, 2]] = (*bp).multiplicity as f64;
                 }
                 let angle = (*bcp).angle;
                 let offset = (*bcp).offset;
-                barcodes.push(BarCode { angle, offset, bars })
+                barcodes.push(BarCode {
+                    angle,
+                    offset,
+                    bars,
+                })
             }
             free_barcodes_result(cbars);
             Ok(barcodes)
@@ -249,12 +263,12 @@ pub fn structure(computation: &ComputationResult) -> BettiStructure {
         let mut points = Vec::with_capacity((*structure).length);
         for p in 0..(*structure).length {
             let cpoint = (*structure).points.offset(p as isize);
-            let point = StructurePoint{
-                x:(*cpoint).x,
-                y:(*cpoint).y,
+            let point = StructurePoint {
+                x: (*cpoint).x,
+                y: (*cpoint).y,
                 betti_0: (*cpoint).betti_0,
                 betti_1: (*cpoint).betti_1,
-                betti_2: (*cpoint).betti_2
+                betti_2: (*cpoint).betti_2,
             };
             points.push(point);
         }
@@ -275,7 +289,7 @@ pub fn structure(computation: &ComputationResult) -> BettiStructure {
         BettiStructure {
             x_grades,
             y_grades,
-            points
+            points,
         }
     }
 }

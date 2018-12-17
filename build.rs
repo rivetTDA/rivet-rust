@@ -1,4 +1,4 @@
-#[cfg(all(unix, not(target_os="macos")))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn main() {
     println!("cargo:rustc-link-lib=static=rivet");
     println!("cargo:rustc-link-search=../rivet/build");
@@ -9,7 +9,7 @@ fn main() {
     println!("cargo:rustc-link-search=../hera/geom_bottleneck/build");
 }
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 fn main() {
     println!("cargo:rustc-link-lib=static=rivet");
     println!("cargo:rustc-link-search=../rivet/build");
