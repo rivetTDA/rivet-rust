@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
-use rivet::BettiStructure;
+use crate::rivet::BettiStructure;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -861,9 +861,9 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
 
 #[cfg(test)]
 mod tests {
-    use hilbert_distance::Dimension;
-    use hilbert_distance::SampleType;
-    use hilbert_distance::SplitMat;
+    use crate::hilbert_distance::Dimension;
+    use crate::hilbert_distance::SampleType;
+    use crate::hilbert_distance::SplitMat;
     use ndarray::arr2;
     use noisy_float::types::r64;
 
@@ -909,7 +909,7 @@ mod tests {
 
     #[test]
     fn distance() {
-        let mut split = SplitMat::new(
+        let split = SplitMat::new(
             arr2(&[[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
             vec![
                 Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn distance_overlapping() {
-        let mut split = SplitMat::new(
+        let split = SplitMat::new(
             arr2(&[[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
             vec![
                 Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
@@ -983,7 +983,7 @@ mod tests {
 
     #[test]
     fn test_sample_min() {
-        let mut split = SplitMat::new(
+        let split = SplitMat::new(
             arr2(&[[1, 2, 3], [2, 4, 6]]),
             vec![
                 Dimension::from_f64s(0., &vec![1.0, 2.0]),
@@ -1007,7 +1007,7 @@ mod tests {
 
     #[test]
     fn test_sample_max() {
-        let mut split = SplitMat::new(
+        let split = SplitMat::new(
             arr2(&[[1, 2, 3], [2, 4, 6]]),
             vec![
                 Dimension::from_f64s(0., &vec![1.0, 2.0]),
@@ -1031,7 +1031,7 @@ mod tests {
 
     #[test]
     fn test_sample_mean() {
-        let mut split = SplitMat::new(
+        let split = SplitMat::new(
             arr2(&[[1, 2, 3], [2, 4, 6]]),
             vec![
                 Dimension::from_f64s(0., &vec![1.0, 2.0]),

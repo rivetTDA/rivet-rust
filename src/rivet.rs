@@ -5,10 +5,12 @@ use std::f64;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::ptr;
-use noisy_float::types::R64;
+use noisy_float::prelude::*;
 use tempdir::TempDir;
 use std::fs::File;
 use std::io::prelude::*;
+use std::process::Command;
+use itertools::Itertools;
 
 #[repr(C)]
 struct CBar {
@@ -31,9 +33,9 @@ struct CBarCodesResult {
     pub length: size_t,
     pub error: *const c_char,
     pub error_length: size_t, //    pub x_low: f64,
-                              //    pub y_low: f64,
-                              //    pub x_high: f64,
-                              //    pub y_high: f64
+    //    pub y_low: f64,
+    //    pub x_high: f64,
+    //    pub y_high: f64
 }
 
 #[repr(C)]
@@ -113,7 +115,7 @@ struct ArrangementBounds {
 }
 
 #[repr(C)]
-struct RivetComputationResult {
+struct RivetModuleInvariants {
     computation: *mut RivetArrangement,
     error: *const c_char,
     error_length: size_t,
@@ -121,7 +123,7 @@ struct RivetComputationResult {
 
 #[link(name = "rivet")]
 extern "C" {
-    fn read_rivet_computation(bytes: *const u8, length: size_t) -> RivetComputationResult;
+    fn read_rivet_computation(bytes: *const u8, length: size_t) -> RivetModuleInvariants;
     fn bounds_from_computation(computation: *mut RivetArrangement) -> ArrangementBounds;
     fn barcodes_from_computation(
         computation: *mut RivetArrangement,
@@ -132,7 +134,7 @@ extern "C" {
     fn structure_from_computation(computation: *const RivetArrangement) -> *mut CStructurePoints;
 
     fn free_barcodes_result(result: CBarCodesResult) -> c_void;
-    fn free_rivet_computation_result(result: RivetComputationResult);
+    fn free_rivet_computation_result(result: RivetModuleInvariants);
     fn free_structure_points(points: *mut CStructurePoints);
 }
 
@@ -142,10 +144,10 @@ pub struct ModuleInvariants {
     arr: *mut RivetArrangement,
 }
 
-impl Drop for ComputationResult {
+impl Drop for ModuleInvariants {
     fn drop(&mut self) {
         unsafe {
-            free_rivet_computation_result(RivetComputationResult {
+            free_rivet_computation_result(RivetModuleInvariants {
                 computation: self.arr,
                 error: ptr::null(),
                 error_length: 0,
@@ -167,24 +169,82 @@ pub struct RivetError {
     kind: RivetErrorKind,
 }
 
+impl std::convert::From<std::io::Error> for RivetError {
+    fn from(error: std::io::Error) -> RivetError {
+        RivetError {
+            message: format!("IO error: {}", error),
+            kind: RivetErrorKind::IO,
+        }
+    }
+}
+
 trait Saveable {
-    fn save(writer: std::io::Writer) -> Result<(), RivetError>;
+    fn save(&self, writer: &mut Write) -> Result<(), RivetError>;
 }
 
 //TODO: make streaming version of the inputs for larger datasets
 pub struct PointCloud {
-    cutoff: Option<R64>,
-    param1_dimensions: Vec<String>,
-    param1_distance_algorithm: String, //TODO: something like "Euclidean", "Graph", or "WeiCang"
-    param2_name: String,
-    comment: String,
-    points: Vec<Vec<R64>>,
-    appearance: Vec<R64>
+    pub cutoff: Option<R64>,
+    pub param1_dimensions: Vec<String>,
+    pub param2_name: Option<String>,
+    pub comment: Option<String>,
+    pub points: Vec<Vec<R64>>,
+    pub appearance: Vec<R64>,
+}
+
+impl PointCloud {
+    fn calculate_cutoff(&self) -> R64 {
+        let mut max = r64(0.0);
+        let dim = self.param1_dimensions.len();
+        for row in 0..self.points.len() {
+            for col in 0..self.points.len() {
+                if row != col {
+                    let p_row = &self.points[row];
+                    let p_col = &self.points[col];
+                    let mut dist = r64(0.0);
+                    for i in 0..dim {
+                        dist += (p_row[i] - p_col[i]).powi(2);
+                    }
+                    if dist > max {
+                        max = dist;
+                    }
+                }
+            }
+        }
+        max.sqrt()
+    }
 }
 
 impl Saveable for PointCloud {
-    fn save(writer: Writer) -> Result<(), RivetError> {
-        unimplemented!()
+    fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
+        match &self.comment {
+            Some(comment) => {
+                let lines = comment.split("\n");
+                for line in lines {
+                    writeln!(writer, "# {}", line)?;
+                }
+            }
+            None => {}
+        }
+        writeln!(writer, "# dimensions: {}", self.param1_dimensions.join(","))?;
+        writeln!(writer, "points")?;
+        writeln!(writer, "{}", self.param1_dimensions.len())?;
+        let cutoff = self.cutoff.unwrap_or(self.calculate_cutoff());
+        writeln!(writer, "{}", cutoff)?;
+        writeln!(writer, "{}", self.param2_name.as_ref().unwrap_or(&"no function".to_string()))?;
+        writeln!(writer)?;
+        for i in 0..self.points.len() {
+            write!(writer,
+                     "{}", self.points[i].iter()
+                         .map(|x|format!("{}", x))
+                         .collect_vec().join(" "))?;
+            if !self.appearance.is_empty() {
+                writeln!(writer, " {}", self.appearance[i])?;
+            } else {
+                writeln!(writer)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -193,13 +253,30 @@ pub struct MetricSpace {
     distance_label: String,
     appearance_label: String,
     appearance_values: Vec<R64>,
-    distance_matrix: Vec<Vec<R64>> //TODO: ndarray?
+    distance_matrix: Vec<Vec<R64>>, //TODO: ndarray?
 }
+
+
+impl Saveable for MetricSpace {
+    fn save(&self, _writer: &mut Write) -> Result<(), RivetError> {
+        unimplemented!()
+    }
+}
+
 
 pub enum RivetInput {
     Points(PointCloud),
     Metric(MetricSpace),
-   //TODO: Bifiltration(Bifiltration)
+    //TODO: Bifiltration(Bifiltration)
+}
+
+impl Saveable for RivetInput {
+    fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
+        match self {
+            RivetInput::Points(points) => points.save(writer),
+            RivetInput::Metric(points) => points.save(writer)
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -209,22 +286,49 @@ pub struct ComputationParameters {
     //TODO: param1_scale: R64,
     //TODO: param2_scale: R64,
     homology_dimension: u32,
-//TODO:    threads: u32
+    threads: u32,
 }
 
-fn generate_file_name(base: &str, params: &ComputationParameters) -> String {
-
-}
-
-pub fn compute(input: RivetInput, parameters: ComputationParameters) -> Result<ModuleInvariants, RivetError> {
+pub fn compute(input: RivetInput, parameters: ComputationParameters) -> Result<Vec<u8>, RivetError> {
     let dir = TempDir::new("rivet-")?;
     let input_path = dir.path().join("rivet-input.txt");
     let output_path = dir.path().join("rivet-output.rivet");
-    let mut input_file = File::create(input_path)?;
+    let mut input_file = File::create(&input_path)?;
+    input.save(&mut input_file)?;
+    //TODO: RIVET C api needs a way to call RIVET to precompute a file
+    //For now just punt, adding this to RIVET C API is too much trouble at the moment
+    let mut command = Command::new("rivet_console");
 
+        command.arg(input_path)
+        .arg(&output_path)
+        .arg("-H")
+        .arg(format!("{}", parameters.homology_dimension))
+        .arg("--num-threads")
+        .arg(format!("{}", std::cmp::max(parameters.threads, 1)));
+    if parameters.param1_bins.is_some() {
+        command.arg("-x")
+            .arg(format!("{}", parameters.param1_bins.unwrap()));
+    }
+    if parameters.param2_bins.is_some() {
+        command.arg("-y")
+            .arg(format!("{}", parameters.param2_bins.unwrap()));
+    }
+    let output = command.output().expect("Failed to execute rivet_console process");
+    let result = if output.status.success() {
+        let output_file = File::create(&output_path)?;
+        let bytes = output_file.bytes().filter_map(|x|x.ok()).collect_vec();
+        Ok(bytes)
+    } else {
+        Err(RivetError {
+            message: String::from_utf8_lossy(&output.stderr).to_string(),
+            kind: RivetErrorKind::Computation,
+        })
+    }?;
+    dir.close()?;
+    Ok(result)
 }
 
-pub fn parse(bytes: &[u8]) -> Result<ComputationResult, RivetError> {
+pub fn parse(bytes: &[u8]) -> Result<ModuleInvariants, RivetError> {
     if bytes.len() == 0 {
         Err(RivetError {
             message: "Byte array must have non-zero length".to_string(),
@@ -246,14 +350,14 @@ pub fn parse(bytes: &[u8]) -> Result<ComputationResult, RivetError> {
                 kind: RivetErrorKind::IO,
             })
         } else {
-            Ok(ComputationResult {
+            Ok(ModuleInvariants {
                 arr: rivet_comp.computation,
             })
         }
     }
 }
 
-pub fn bounds(computation: &ComputationResult) -> Bounds {
+pub fn bounds(computation: &ModuleInvariants) -> Bounds {
     unsafe {
         let res = bounds_from_computation(computation.arr);
 
@@ -267,7 +371,7 @@ pub fn bounds(computation: &ComputationResult) -> Bounds {
 }
 
 pub fn barcodes(
-    computation: &ComputationResult,
+    computation: &ModuleInvariants,
     angle_offsets: &[(f64, f64)],
 ) -> Result<Vec<BarCode>, RivetError> {
     let angles: Vec<f64> = angle_offsets.iter().map(|p| p.0).collect();
@@ -318,7 +422,7 @@ pub fn barcodes(
     }
 }
 
-pub fn structure(computation: &ComputationResult) -> BettiStructure {
+pub fn structure(computation: &ModuleInvariants) -> BettiStructure {
     unsafe {
         let structure = structure_from_computation(computation.arr);
         let mut points = Vec::with_capacity((*structure).length);
@@ -355,8 +459,8 @@ pub fn structure(computation: &ComputationResult) -> BettiStructure {
     }
 }
 
-impl ComputationResult {
-    pub fn bounds(self: &ComputationResult) -> Bounds {
+impl ModuleInvariants {
+    pub fn bounds(self: &ModuleInvariants) -> Bounds {
         return bounds(self);
     }
 }
