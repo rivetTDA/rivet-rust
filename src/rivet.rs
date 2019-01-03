@@ -5,6 +5,10 @@ use std::f64;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::ptr;
+use noisy_float::types::R64;
+use tempdir::TempDir;
+use std::fs::File;
+use std::io::prelude::*;
 
 #[repr(C)]
 struct CBar {
@@ -134,7 +138,7 @@ extern "C" {
 
 enum RivetArrangement {}
 
-pub struct ComputationResult {
+pub struct ModuleInvariants {
     arr: *mut RivetArrangement,
 }
 
@@ -161,6 +165,63 @@ pub enum RivetErrorKind {
 pub struct RivetError {
     message: String,
     kind: RivetErrorKind,
+}
+
+trait Saveable {
+    fn save(writer: std::io::Writer) -> Result<(), RivetError>;
+}
+
+//TODO: make streaming version of the inputs for larger datasets
+pub struct PointCloud {
+    cutoff: Option<R64>,
+    param1_dimensions: Vec<String>,
+    param1_distance_algorithm: String, //TODO: something like "Euclidean", "Graph", or "WeiCang"
+    param2_name: String,
+    comment: String,
+    points: Vec<Vec<R64>>,
+    appearance: Vec<R64>
+}
+
+impl Saveable for PointCloud {
+    fn save(writer: Writer) -> Result<(), RivetError> {
+        unimplemented!()
+    }
+}
+
+pub struct MetricSpace {
+    commment: String,
+    distance_label: String,
+    appearance_label: String,
+    appearance_values: Vec<R64>,
+    distance_matrix: Vec<Vec<R64>> //TODO: ndarray?
+}
+
+pub enum RivetInput {
+    Points(PointCloud),
+    Metric(MetricSpace),
+   //TODO: Bifiltration(Bifiltration)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ComputationParameters {
+    param1_bins: Option<u32>,
+    param2_bins: Option<u32>,
+    //TODO: param1_scale: R64,
+    //TODO: param2_scale: R64,
+    homology_dimension: u32,
+//TODO:    threads: u32
+}
+
+fn generate_file_name(base: &str, params: &ComputationParameters) -> String {
+
+}
+
+pub fn compute(input: RivetInput, parameters: ComputationParameters) -> Result<ModuleInvariants, RivetError> {
+    let dir = TempDir::new("rivet-")?;
+    let input_path = dir.path().join("rivet-input.txt");
+    let output_path = dir.path().join("rivet-output.rivet");
+    let mut input_file = File::create(input_path)?;
+
 }
 
 pub fn parse(bytes: &[u8]) -> Result<ComputationResult, RivetError> {
