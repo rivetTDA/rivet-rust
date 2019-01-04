@@ -11,6 +11,8 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 use itertools::Itertools;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 #[repr(C)]
 struct CBar {
@@ -169,6 +171,12 @@ pub struct RivetError {
     kind: RivetErrorKind,
 }
 
+impl Display for RivetError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "RIVET error: {}", self.message)
+    }
+}
+
 impl std::convert::From<std::io::Error> for RivetError {
     fn from(error: std::io::Error) -> RivetError {
         RivetError {
@@ -183,7 +191,7 @@ trait Saveable {
 }
 
 //TODO: make streaming version of the inputs for larger datasets
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PointCloudParameters {
     pub cutoff: Option<R64>,
     //TODO: pub distance_label: String,
@@ -192,7 +200,7 @@ pub struct PointCloudParameters {
     pub comment: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PointCloud {
     pub parameters: PointCloudParameters,
     pub points: Vec<Vec<R64>>,
@@ -260,14 +268,14 @@ impl Saveable for PointCloud {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MetricSpaceParameters {
     pub comment: Option<String>,
     pub distance_label: String,
     pub appearance_label: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MetricSpace {
     pub parameters: MetricSpaceParameters,
     pub appearance_values: Vec<R64>,
@@ -311,14 +319,23 @@ impl Saveable for MetricSpace {
 }
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RivetInput {
     Points(PointCloud),
     Metric(MetricSpace),
 //TODO: Bifiltration(Bifiltration)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl RivetInput {
+    pub fn parameters(&self) -> RivetInputParameters {
+        match self {
+            RivetInput::Points(pc) => RivetInputParameters::Points(pc.parameters.clone()),
+            RivetInput::Metric(m) => RivetInputParameters::Metric(m.parameters.clone())
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RivetInputParameters {
     Points(PointCloudParameters),
     Metric(MetricSpaceParameters),
@@ -334,7 +351,7 @@ impl Saveable for RivetInput {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ComputationParameters {
     param1_bins: Option<u32>,
     appearance_bins: Option<u32>,
@@ -344,7 +361,7 @@ pub struct ComputationParameters {
     threads: u32,
 }
 
-pub fn compute(input: RivetInput, parameters: ComputationParameters) -> Result<Vec<u8>, RivetError> {
+pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result<Vec<u8>, RivetError> {
     let dir = TempDir::new("rivet-")?;
     let input_path = dir.path().join("rivet-input.txt");
     let output_path = dir.path().join("rivet-output.rivet");

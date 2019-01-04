@@ -12,9 +12,6 @@ extern crate num_iter;
 
 #[macro_use]
 extern crate serde_derive;
-// extern crate serde_yaml;
-// extern crate docopt;
-// extern crate alloc_system;
 extern crate itertools;
 
 // use alloc_system::System;

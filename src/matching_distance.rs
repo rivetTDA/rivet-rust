@@ -1,7 +1,7 @@
-use hera;
+use crate::hera;
 use ndarray::{Array1, Zip};
-use rivet;
-use rivet::RivetError;
+use crate::rivet;
+use crate::rivet::RivetError;
 use std::cmp;
 
 fn find_offset(slope: f64, point: (f64, f64)) -> f64 {
