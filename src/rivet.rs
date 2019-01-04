@@ -183,12 +183,18 @@ trait Saveable {
 }
 
 //TODO: make streaming version of the inputs for larger datasets
-pub struct PointCloud {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PointCloudParameters {
     pub cutoff: Option<R64>,
     //TODO: pub distance_label: String,
     pub distance_dimensions: Vec<String>,
     pub appearance_label: Option<String>,
     pub comment: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PointCloud {
+    pub parameters: PointCloudParameters,
     pub points: Vec<Vec<R64>>,
     pub appearance: Vec<R64>,
 }
@@ -196,7 +202,7 @@ pub struct PointCloud {
 impl PointCloud {
     fn calculate_cutoff(&self) -> R64 {
         let mut max = r64(0.0);
-        let dim = self.distance_dimensions.len();
+        let dim = self.parameters.distance_dimensions.len();
         for row in 0..self.points.len() {
             for col in 0..self.points.len() {
                 if row != col {
@@ -231,13 +237,13 @@ fn write_comments(writer: &mut Write, comments: &Option<String>) -> Result<(), s
 
 impl Saveable for PointCloud {
     fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
-        write_comments(writer, &self.comment)?;
-        writeln!(writer, "# dimensions: {}", self.distance_dimensions.join(","))?;
+        write_comments(writer, &self.parameters.comment)?;
+        writeln!(writer, "# dimensions: {}", self.parameters.distance_dimensions.join(","))?;
         writeln!(writer, "points")?;
-        writeln!(writer, "{}", self.distance_dimensions.len())?;
-        let cutoff = self.cutoff.unwrap_or(self.calculate_cutoff());
+        writeln!(writer, "{}", self.parameters.distance_dimensions.len())?;
+        let cutoff = self.parameters.cutoff.unwrap_or(self.calculate_cutoff());
         writeln!(writer, "{}", cutoff)?;
-        writeln!(writer, "{}", self.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
+        writeln!(writer, "{}", self.parameters.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
         writeln!(writer)?;
         for i in 0..self.points.len() {
             write!(writer,
@@ -254,12 +260,18 @@ impl Saveable for PointCloud {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetricSpaceParameters {
+    pub comment: Option<String>,
+    pub distance_label: String,
+    pub appearance_label: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetricSpace {
-    comment: Option<String>,
-    distance_label: String,
-    appearance_label: Option<String>,
-    appearance_values: Vec<R64>,
-    distance_matrix: Vec<Vec<R64>>, //TODO: ndarray?
+    pub parameters: MetricSpaceParameters,
+    pub appearance_values: Vec<R64>,
+    pub distance_matrix: Vec<Vec<R64>>, //TODO: ndarray?
 }
 
 impl MetricSpace {
@@ -279,15 +291,15 @@ impl MetricSpace {
 
 impl Saveable for MetricSpace {
     fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
-        write_comments(writer, &self.comment)?;
+        write_comments(writer, &self.parameters.comment)?;
         writeln!(writer, "metric")?;
-        writeln!(writer, "{}", self.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
+        writeln!(writer, "{}", self.parameters.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
         for app in self.appearance_values.iter() {
             write!(writer, "{} ", app)?;
         }
         writeln!(writer)?;
         writeln!(writer, "{}", self.calculate_cutoff())?;
-        writeln!(writer, "{}", self.distance_label)?;
+        writeln!(writer, "{}", self.parameters.distance_label)?;
         for row in 0..self.distance_matrix.len() {
             for col in row + 1..self.distance_matrix[0].len() {
                 write!(writer, "{} ", self.distance_matrix[row][col])?;
@@ -299,10 +311,18 @@ impl Saveable for MetricSpace {
 }
 
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum RivetInput {
     Points(PointCloud),
     Metric(MetricSpace),
 //TODO: Bifiltration(Bifiltration)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum RivetInputParameters {
+    Points(PointCloudParameters),
+    Metric(MetricSpaceParameters),
+//TODO: Bifiltration(BifiltrationParameters)
 }
 
 impl Saveable for RivetInput {
