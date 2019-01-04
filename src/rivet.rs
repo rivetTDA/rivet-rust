@@ -185,8 +185,9 @@ trait Saveable {
 //TODO: make streaming version of the inputs for larger datasets
 pub struct PointCloud {
     pub cutoff: Option<R64>,
-    pub param1_dimensions: Vec<String>,
-    pub param2_name: Option<String>,
+    //TODO: pub distance_label: String,
+    pub distance_dimensions: Vec<String>,
+    pub appearance_label: Option<String>,
     pub comment: Option<String>,
     pub points: Vec<Vec<R64>>,
     pub appearance: Vec<R64>,
@@ -195,7 +196,7 @@ pub struct PointCloud {
 impl PointCloud {
     fn calculate_cutoff(&self) -> R64 {
         let mut max = r64(0.0);
-        let dim = self.param1_dimensions.len();
+        let dim = self.distance_dimensions.len();
         for row in 0..self.points.len() {
             for col in 0..self.points.len() {
                 if row != col {
@@ -215,29 +216,34 @@ impl PointCloud {
     }
 }
 
+fn write_comments(writer: &mut Write, comments: &Option<String>) -> Result<(), std::io::Error> {
+    match &comments {
+        Some(comment) => {
+            let lines = comment.split("\n");
+            for line in lines {
+                writeln!(writer, "# {}", line)?;
+            }
+        }
+        None => {}
+    }
+    Ok(())
+}
+
 impl Saveable for PointCloud {
     fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
-        match &self.comment {
-            Some(comment) => {
-                let lines = comment.split("\n");
-                for line in lines {
-                    writeln!(writer, "# {}", line)?;
-                }
-            }
-            None => {}
-        }
-        writeln!(writer, "# dimensions: {}", self.param1_dimensions.join(","))?;
+        write_comments(writer, &self.comment)?;
+        writeln!(writer, "# dimensions: {}", self.distance_dimensions.join(","))?;
         writeln!(writer, "points")?;
-        writeln!(writer, "{}", self.param1_dimensions.len())?;
+        writeln!(writer, "{}", self.distance_dimensions.len())?;
         let cutoff = self.cutoff.unwrap_or(self.calculate_cutoff());
         writeln!(writer, "{}", cutoff)?;
-        writeln!(writer, "{}", self.param2_name.as_ref().unwrap_or(&"no function".to_string()))?;
+        writeln!(writer, "{}", self.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
         writeln!(writer)?;
         for i in 0..self.points.len() {
             write!(writer,
-                     "{}", self.points[i].iter()
-                         .map(|x|format!("{}", x))
-                         .collect_vec().join(" "))?;
+                   "{}", self.points[i].iter()
+                       .map(|x| format!("{}", x))
+                       .collect_vec().join(" "))?;
             if !self.appearance.is_empty() {
                 writeln!(writer, " {}", self.appearance[i])?;
             } else {
@@ -249,17 +255,46 @@ impl Saveable for PointCloud {
 }
 
 pub struct MetricSpace {
-    commment: String,
+    comment: Option<String>,
     distance_label: String,
-    appearance_label: String,
+    appearance_label: Option<String>,
     appearance_values: Vec<R64>,
     distance_matrix: Vec<Vec<R64>>, //TODO: ndarray?
 }
 
+impl MetricSpace {
+    fn calculate_cutoff(&self) -> R64 {
+        let mut max = r64(0.0);
+        for row in 0..self.distance_matrix.len() {
+            for col in row + 1..self.distance_matrix[0].len() {
+                let dist = self.distance_matrix[row][col];
+                if dist > max {
+                    max = dist;
+                }
+            }
+        }
+        max
+    }
+}
 
 impl Saveable for MetricSpace {
-    fn save(&self, _writer: &mut Write) -> Result<(), RivetError> {
-        unimplemented!()
+    fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
+        write_comments(writer, &self.comment)?;
+        writeln!(writer, "metric")?;
+        writeln!(writer, "{}", self.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
+        for app in self.appearance_values.iter() {
+            write!(writer, "{} ", app)?;
+        }
+        writeln!(writer)?;
+        writeln!(writer, "{}", self.calculate_cutoff())?;
+        writeln!(writer, "{}", self.distance_label)?;
+        for row in 0..self.distance_matrix.len() {
+            for col in row + 1..self.distance_matrix[0].len() {
+                write!(writer, "{} ", self.distance_matrix[row][col])?;
+            }
+            writeln!(writer)?;
+        }
+        Ok(())
     }
 }
 
@@ -267,7 +302,7 @@ impl Saveable for MetricSpace {
 pub enum RivetInput {
     Points(PointCloud),
     Metric(MetricSpace),
-    //TODO: Bifiltration(Bifiltration)
+//TODO: Bifiltration(Bifiltration)
 }
 
 impl Saveable for RivetInput {
@@ -282,9 +317,9 @@ impl Saveable for RivetInput {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ComputationParameters {
     param1_bins: Option<u32>,
-    param2_bins: Option<u32>,
+    appearance_bins: Option<u32>,
     //TODO: param1_scale: R64,
-    //TODO: param2_scale: R64,
+//TODO: appearance_scale: R64,
     homology_dimension: u32,
     threads: u32,
 }
@@ -295,11 +330,11 @@ pub fn compute(input: RivetInput, parameters: ComputationParameters) -> Result<V
     let output_path = dir.path().join("rivet-output.rivet");
     let mut input_file = File::create(&input_path)?;
     input.save(&mut input_file)?;
-    //TODO: RIVET C api needs a way to call RIVET to precompute a file
-    //For now just punt, adding this to RIVET C API is too much trouble at the moment
+//TODO: RIVET C api needs a way to call RIVET to precompute a file
+//For now just punt, adding this to RIVET C API is too much trouble at the moment
     let mut command = Command::new("rivet_console");
 
-        command.arg(input_path)
+    command.arg(input_path)
         .arg(&output_path)
         .arg("-H")
         .arg(format!("{}", parameters.homology_dimension))
@@ -309,14 +344,14 @@ pub fn compute(input: RivetInput, parameters: ComputationParameters) -> Result<V
         command.arg("-x")
             .arg(format!("{}", parameters.param1_bins.unwrap()));
     }
-    if parameters.param2_bins.is_some() {
+    if parameters.appearance_bins.is_some() {
         command.arg("-y")
-            .arg(format!("{}", parameters.param2_bins.unwrap()));
+            .arg(format!("{}", parameters.appearance_bins.unwrap()));
     }
     let output = command.output().expect("Failed to execute rivet_console process");
     let result = if output.status.success() {
         let output_file = File::create(&output_path)?;
-        let bytes = output_file.bytes().filter_map(|x|x.ok()).collect_vec();
+        let bytes = output_file.bytes().filter_map(|x| x.ok()).collect_vec();
         Ok(bytes)
     } else {
         Err(RivetError {
