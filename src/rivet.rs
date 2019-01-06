@@ -171,6 +171,12 @@ pub struct RivetError {
     kind: RivetErrorKind,
 }
 
+impl RivetError {
+    pub fn new(message: String, kind: RivetErrorKind) -> RivetError {
+        RivetError { message, kind }
+    }
+}
+
 impl Display for RivetError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
         write!(f, "RIVET error: {}", self.message)
@@ -186,6 +192,12 @@ impl std::convert::From<std::io::Error> for RivetError {
     }
 }
 
+impl std::convert::From<std::num::ParseFloatError> for RivetError {
+    fn from(error: std::num::ParseFloatError) -> RivetError {
+        RivetError::new(format!("{}", error), RivetErrorKind::InputValidation)
+    }
+}
+
 trait Saveable {
     fn save(&self, writer: &mut Write) -> Result<(), RivetError>;
 }
@@ -197,7 +209,7 @@ pub struct PointCloudParameters {
     //TODO: pub distance_label: String,
     pub distance_dimensions: Vec<String>,
     pub appearance_label: Option<String>,
-    pub comment: Option<String>,
+    pub comment: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -230,15 +242,9 @@ impl PointCloud {
     }
 }
 
-fn write_comments(writer: &mut Write, comments: &Option<String>) -> Result<(), std::io::Error> {
-    match &comments {
-        Some(comment) => {
-            let lines = comment.split("\n");
-            for line in lines {
-                writeln!(writer, "# {}", line)?;
-            }
-        }
-        None => {}
+fn write_comments(writer: &mut Write, comments: &Vec<String>) -> Result<(), std::io::Error> {
+    for line in comments {
+        writeln!(writer, "# {}", line)?;
     }
     Ok(())
 }
@@ -270,7 +276,7 @@ impl Saveable for PointCloud {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MetricSpaceParameters {
-    pub comment: Option<String>,
+    pub comment: Vec<String>,
     pub distance_label: String,
     pub appearance_label: Option<String>,
 }
@@ -280,6 +286,10 @@ pub struct MetricSpace {
     pub parameters: MetricSpaceParameters,
     pub appearance_values: Vec<R64>,
     pub distance_matrix: Vec<Vec<R64>>, //TODO: ndarray?
+}
+
+pub struct InputFile {
+    data: Vec<u8>
 }
 
 impl MetricSpace {
@@ -323,6 +333,7 @@ impl Saveable for MetricSpace {
 pub enum RivetInput {
     Points(PointCloud),
     Metric(MetricSpace),
+//    File(Vec<u8>)
 //TODO: Bifiltration(Bifiltration)
 }
 
@@ -353,20 +364,27 @@ impl Saveable for RivetInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ComputationParameters {
-    param1_bins: Option<u32>,
-    appearance_bins: Option<u32>,
+    pub param1_bins: Option<u32>,
+    pub appearance_bins: Option<u32>,
     //TODO: param1_scale: R64,
 //TODO: appearance_scale: R64,
-    homology_dimension: u32,
-    threads: u32,
+    pub homology_dimension: u32,
+    pub threads: usize,
 }
 
 pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result<Vec<u8>, RivetError> {
     let dir = TempDir::new("rivet-")?;
     let input_path = dir.path().join("rivet-input.txt");
     let output_path = dir.path().join("rivet-output.rivet");
-    let mut input_file = File::create(&input_path)?;
-    input.save(&mut input_file)?;
+    {
+        let mut input_file = File::create(&input_path)?;
+        input.save(&mut input_file)?;
+    }
+    {
+        let data = std::fs::read(&input_path)?;
+        let check = String::from_utf8_lossy(data.as_slice());
+        info!("Generated this file content: {}", check);
+    }
 //TODO: RIVET C api needs a way to call RIVET to precompute a file
 //For now just punt, adding this to RIVET C API is too much trouble at the moment
     let mut command = Command::new("rivet_console");
@@ -375,7 +393,7 @@ pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result
         .arg(&output_path)
         .arg("-H")
         .arg(format!("{}", parameters.homology_dimension))
-        .arg("--num-threads")
+        .arg("--num_threads")
         .arg(format!("{}", std::cmp::max(parameters.threads, 1)));
     if parameters.param1_bins.is_some() {
         command.arg("-x")
@@ -385,14 +403,21 @@ pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result
         command.arg("-y")
             .arg(format!("{}", parameters.appearance_bins.unwrap()));
     }
+    info!("Calling rivet_console: {:?}", command);
     let output = command.output().expect("Failed to execute rivet_console process");
+    info!("Console exited");
     let result = if output.status.success() {
-        let output_file = File::create(&output_path)?;
+        info!("Success - reading RIVET output file back into memory");
+        let output_file = File::open(&output_path)?;
         let bytes = output_file.bytes().filter_map(|x| x.ok()).collect_vec();
+        info!("Success - returning {} bytes", bytes.len());
         Ok(bytes)
     } else {
+        info!("Something went wrong");
+        let message = String::from_utf8_lossy(&output.stderr).to_string();
+        info!("Failure: {}", &message);
         Err(RivetError {
-            message: String::from_utf8_lossy(&output.stderr).to_string(),
+            message,
             kind: RivetErrorKind::Computation,
         })
     }?;
