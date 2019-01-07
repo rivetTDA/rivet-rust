@@ -408,8 +408,7 @@ pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result
     info!("Console exited");
     let result = if output.status.success() {
         info!("Success - reading RIVET output file back into memory");
-        let output_file = File::open(&output_path)?;
-        let bytes = output_file.bytes().filter_map(|x| x.ok()).collect_vec();
+        let bytes = std::fs::read(&output_path)?;
         info!("Success - returning {} bytes", bytes.len());
         Ok(bytes)
     } else {
