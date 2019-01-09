@@ -79,7 +79,7 @@ pub struct StructurePoint {
     pub betti_2: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BettiStructure {
     pub x_grades: Vec<Rational64>,
     pub y_grades: Vec<Rational64>,
@@ -146,6 +146,11 @@ pub struct ModuleInvariants {
     arr: *mut RivetArrangement,
 }
 
+impl ModuleInvariants {
+    pub fn from(data: &[u8]) -> Result<ModuleInvariants, RivetError> {
+        parse(data)
+    }
+}
 impl Drop for ModuleInvariants {
     fn drop(&mut self) {
         unsafe {
@@ -175,6 +180,7 @@ impl RivetError {
     pub fn new(message: String, kind: RivetErrorKind) -> RivetError {
         RivetError { message, kind }
     }
+    pub fn validation(message: String) -> RivetError { RivetError{message, kind: RivetErrorKind::InputValidation}}
 }
 
 impl Display for RivetError {
@@ -198,7 +204,7 @@ impl std::convert::From<std::num::ParseFloatError> for RivetError {
     }
 }
 
-trait Saveable {
+pub trait Saveable {
     fn save(&self, writer: &mut Write) -> Result<(), RivetError>;
 }
 
@@ -240,6 +246,7 @@ impl PointCloud {
         }
         max.sqrt()
     }
+
 }
 
 fn write_comments(writer: &mut Write, comments: &Vec<String>) -> Result<(), std::io::Error> {
@@ -571,3 +578,4 @@ impl Bounds {
         }
     }
 }
+

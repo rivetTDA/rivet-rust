@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
-use crate::rivet::BettiStructure;
+use crate::rivet::{BettiStructure, RivetError, ModuleInvariants};
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -672,20 +672,20 @@ impl SplitMat {
         r64(combined.sqrt())
     }
 
-    pub fn betti_to_splitmat(betti: BettiStructure) -> Result<SplitMat, String> {
+    pub fn betti_to_splitmat(betti: BettiStructure) -> Result<SplitMat, RivetError> {
         let xs = betti.x_grades.iter().map(rational_to_r64).collect_vec();
         let ys = betti.y_grades.iter().map(rational_to_r64).collect_vec();
         if xs.len() == 0 {
-            return Err("No x grades".to_owned());
+            return Err(RivetError::validation("No x grades".to_owned()));
         }
         if ys.len() == 0 {
-            return Err("No y grades".to_owned());
+            return Err(RivetError::validation("No y grades".to_owned()));
         }
         if !is_sorted(&xs) {
-            return Err("x grades from RIVET not sorted".to_owned());
+            return Err(RivetError::validation("x grades from RIVET not sorted".to_owned()));
         }
         if !is_sorted(&ys) {
-            return Err("y grades from RIVET not sorted".to_owned());
+            return Err(RivetError::validation("y grades from RIVET not sorted".to_owned()));
         }
         //        let dimensions = vec![
         //            Dimension::new(ys[0], ys[1..].to_owned()),
@@ -703,10 +703,10 @@ impl SplitMat {
         let x_nonzero_lengths = x_lengths.iter().filter(|&&x| x != r64(0.)).count();
         let y_nonzero_lengths = y_lengths.iter().filter(|&&y| y != r64(0.)).count();
         if x_nonzero_lengths == 0 {
-            return Err("No nonzero x lengths".to_owned());
+            return Err(RivetError::validation("No nonzero x lengths".to_owned()));
         }
         if y_nonzero_lengths == 0 {
-            return Err("No nonzero y lengths".to_owned());
+            return Err(RivetError::validation("No nonzero y lengths".to_owned()));
         }
         let mut unique_ys = Vec::with_capacity(ys.len());
         for y in ys {
@@ -857,6 +857,24 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
     fn sub(self, rhs: &SplitMat) -> Self::Output {
         self + (-rhs)
     }
+}
+
+pub fn fingerprint(computation_result: &ModuleInvariants,
+               template: &SplitMat) -> Result<Vec<f64>, RivetError> {
+    let structure = crate::rivet::structure(&computation_result);
+    let matrix = SplitMat::betti_to_splitmat(structure)?;
+
+    let sample = matrix.sample(&template, SampleType::MEAN);
+    let shape = sample.shape();
+    let mut vector = vec![0.0; shape[0] * shape[1]];
+    let mut pos = 0;
+    for row in 0..shape[0] {
+        for col in 0..shape[1] {
+            vector[pos] = sample[(row, col)].raw();
+            pos += 1;
+        }
+    }
+    Ok(vector)
 }
 
 #[cfg(test)]
@@ -1071,3 +1089,4 @@ mod tests {
         assert_eq!(expected, mean);
     }
 }
+
