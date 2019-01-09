@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
-use crate::rivet::{BettiStructure, RivetError, ModuleInvariants};
+use crate::rivet::{BettiStructure, RivetError};
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -672,7 +672,7 @@ impl SplitMat {
         r64(combined.sqrt())
     }
 
-    pub fn betti_to_splitmat(betti: BettiStructure) -> Result<SplitMat, RivetError> {
+    pub fn betti_to_splitmat(betti: &BettiStructure) -> Result<SplitMat, RivetError> {
         let xs = betti.x_grades.iter().map(rational_to_r64).collect_vec();
         let ys = betti.y_grades.iter().map(rational_to_r64).collect_vec();
         if xs.len() == 0 {
@@ -727,7 +727,7 @@ impl SplitMat {
         assert_eq!(dimensions[0].len(), y_nonzero_lengths);
         assert_eq!(dimensions[1].len(), x_nonzero_lengths);
         let mut mat = Array2::<i32>::zeros((y_nonzero_lengths, x_nonzero_lengths));
-        for point in betti.points {
+        for point in betti.points.iter() {
             let mut x = point.x as isize;
             let mut y = point.y as isize;
             for row in 0..(y_lengths.len()) {
@@ -859,9 +859,8 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
     }
 }
 
-pub fn fingerprint(computation_result: &ModuleInvariants,
+pub fn fingerprint(structure: &BettiStructure,
                template: &SplitMat) -> Result<Vec<f64>, RivetError> {
-    let structure = crate::rivet::structure(&computation_result);
     let matrix = SplitMat::betti_to_splitmat(structure)?;
 
     let sample = matrix.sample(&template, SampleType::MEAN);

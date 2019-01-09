@@ -13,6 +13,7 @@ use std::process::Command;
 use itertools::Itertools;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::io::{BufReader, Read};
 
 #[repr(C)]
 struct CBar {
@@ -295,10 +296,6 @@ pub struct MetricSpace {
     pub distance_matrix: Vec<Vec<R64>>, //TODO: ndarray?
 }
 
-pub struct InputFile {
-    data: Vec<u8>
-}
-
 impl MetricSpace {
     fn calculate_cutoff(&self) -> R64 {
         let mut max = r64(0.0);
@@ -579,3 +576,94 @@ impl Bounds {
     }
 }
 
+pub fn parse_input<R:Read>(read: R) -> Result<RivetInput, RivetError> {
+    let reader = BufReader::new(read);
+    let mut comment = vec![];
+    enum FileType {
+        PointCloud,
+        Metric,
+//        Bifiltration
+    };
+    let file_type;
+    let mut lines = reader.lines();
+    loop {
+        match lines.next() {
+            None => return Err(RivetError::new("Reached end of input file without determining file type".to_owned(),
+                                               RivetErrorKind::InputValidation)),
+            Some(line) => {
+                let line = line?;
+                let clean = line.trim();
+                if clean.starts_with("#") {
+                    comment.push(clean[1..].to_owned());
+                } else {
+                    file_type = Some(match clean {
+                        "points" => Ok(FileType::PointCloud),
+                        "metric" => Ok(FileType::Metric),
+                        other => Err(RivetError::new(format!("Unrecognized file type '{}'", other), RivetErrorKind::InputValidation))
+                    }?);
+                    break;
+                }
+            }
+        }
+    }
+    let mut skip_comments =
+        lines.map_results(|x| x.trim().to_string())
+            .filter(|x| {
+                match x {
+                    Err(_) => true,
+                    Ok(line) => !(line == "" || line.starts_with("#"))
+                }
+            });
+    match file_type {
+        None => Err(RivetError::new("No file type found".to_owned(), RivetErrorKind::InputValidation)),
+        Some(ft) => match ft {
+            FileType::PointCloud => parse_pointcloud(&mut skip_comments, comment),
+            FileType::Metric => parse_metric(&mut skip_comments, comment)
+        }
+    }
+}
+
+fn eof_error(msg: &str) -> RivetError {
+    RivetError::new(msg.to_string(), RivetErrorKind::InputValidation)
+}
+
+fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, comment: Vec<String>) -> Result<RivetInput, RivetError> {
+    let point_dim = buf.next().ok_or(eof_error("No dimension line!"))??;
+    let cutoff = r64((buf.next().ok_or(eof_error("No max distance!"))??).parse::<f64>()?);
+    let appearance_label = (buf.next().ok_or(eof_error("No label!"))?)?.to_string();
+    let mut points = vec![];
+    let mut appearance = vec![];
+    loop {
+        match buf.next() {
+            None => break,
+            Some(line) => {
+                let could_be_numbers = (line?).split_whitespace().map(|x| x.parse::<f64>()).collect_vec();
+                let (f64s, errors): (Vec<Result<f64, _>>, _) = could_be_numbers.into_iter().partition(|x| x.is_ok());
+                for err in errors {
+                    err?;
+                }
+                let numbers = f64s.into_iter().map(|x| r64(x.unwrap())).collect_vec();
+                points.push(numbers[0..numbers.len() - 1].to_vec());
+                appearance.push(numbers[numbers.len() - 1])
+            }
+        }
+    }
+    //TODO: not always the case of course! Fix!
+    let distance_dimensions = vec!["x", "y", "z"].into_iter().map(|x| x.to_string()).collect_vec();
+    Ok(RivetInput::Points(
+        PointCloud {
+            parameters: PointCloudParameters {
+                cutoff: Some(cutoff),
+                distance_dimensions,
+                appearance_label: Some(appearance_label),
+                comment,
+            },
+            points,
+            appearance,
+        }
+    ))
+}
+
+fn parse_metric(_buf: &mut Iterator<Item=Result<String, std::io::Error>>, _comment: Vec<String>) -> Result<RivetInput, RivetError> {
+    unimplemented!()
+}
