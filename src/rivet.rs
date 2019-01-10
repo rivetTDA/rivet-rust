@@ -237,14 +237,11 @@ impl From<Context<RivetErrorKind>> for RivetError {
 //    }
 //}
 
-//impl std::convert::From<std::io::Error> for RivetError {
-//    fn from(error: std::io::Error) -> RivetError {
-//        RivetError {
-//            message: format!("IO error: {}", error),
-//            kind: RivetErrorKind::Io,
-//        }
-//    }
-//}
+impl std::convert::From<std::io::Error> for RivetError {
+    fn from(error: std::io::Error) -> RivetError {
+        RivetError::from(error.context(RivetErrorKind::Io))
+    }
+}
 //
 //impl std::convert::From<std::num::ParseFloatError> for RivetError {
 //    fn from(error: std::num::ParseFloatError) -> RivetError {
