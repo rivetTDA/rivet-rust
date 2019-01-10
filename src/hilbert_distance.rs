@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
-use crate::rivet::{BettiStructure, RivetError};
+use crate::rivet::{BettiStructure, invalid, RivetError};
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -676,16 +676,16 @@ impl SplitMat {
         let xs = betti.x_grades.iter().map(rational_to_r64).collect_vec();
         let ys = betti.y_grades.iter().map(rational_to_r64).collect_vec();
         if xs.len() == 0 {
-            return Err(RivetError::validation("No x grades".to_owned()));
+            invalid("No x grades")?;
         }
         if ys.len() == 0 {
-            return Err(RivetError::validation("No y grades".to_owned()));
+            invalid("No y grades")?;
         }
         if !is_sorted(&xs) {
-            return Err(RivetError::validation("x grades from RIVET not sorted".to_owned()));
+            invalid("x grades from RIVET not sorted")?;
         }
         if !is_sorted(&ys) {
-            return Err(RivetError::validation("y grades from RIVET not sorted".to_owned()));
+            invalid("y grades from RIVET not sorted")?;
         }
         //        let dimensions = vec![
         //            Dimension::new(ys[0], ys[1..].to_owned()),
@@ -703,10 +703,10 @@ impl SplitMat {
         let x_nonzero_lengths = x_lengths.iter().filter(|&&x| x != r64(0.)).count();
         let y_nonzero_lengths = y_lengths.iter().filter(|&&y| y != r64(0.)).count();
         if x_nonzero_lengths == 0 {
-            return Err(RivetError::validation("No nonzero x lengths".to_owned()));
+            invalid("No nonzero x lengths")?;
         }
         if y_nonzero_lengths == 0 {
-            return Err(RivetError::validation("No nonzero y lengths".to_owned()));
+            invalid("No nonzero y lengths")?;
         }
         let mut unique_ys = Vec::with_capacity(ys.len());
         for y in ys {

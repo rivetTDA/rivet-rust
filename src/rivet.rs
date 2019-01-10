@@ -14,6 +14,8 @@ use itertools::Itertools;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::{BufReader, Read};
+use std::convert::From;
+use failure::{Fail, Context, Backtrace, ResultExt};
 
 #[repr(C)]
 struct CBar {
@@ -164,49 +166,94 @@ impl Drop for ModuleInvariants {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Fail, Clone)]
 pub enum RivetErrorKind {
-    InputValidation,
-    IO,
-    Computation,
+    #[fail(display = "Invalid floating point number")]
+    InvalidFloat,
+
+    #[fail(display = "RIVET input validation failure: {}", _0)]
+    Validation(String),
+
+    #[fail(display = "RIVET I/O failure")]
+    Io,
+
+    #[fail(display = "RIVET computation failure: {}", _0)]
+    Computation(String),
+}
+
+pub fn invalid<T>(message: &str) -> Result<T, RivetError> {
+    Err(RivetErrorKind::Validation(message.to_owned()))?
 }
 
 #[derive(Debug)]
 pub struct RivetError {
-    message: String,
-    kind: RivetErrorKind,
+    inner: Context<RivetErrorKind>
 }
 
-impl RivetError {
-    pub fn new(message: String, kind: RivetErrorKind) -> RivetError {
-        RivetError { message, kind }
+impl Fail for RivetError {
+    fn cause(&self) -> Option<&Fail> {
+        self.inner.cause()
     }
-    pub fn validation(message: String) -> RivetError { RivetError{message, kind: RivetErrorKind::InputValidation}}
+
+    fn backtrace(&self) -> Option<&Backtrace> {
+        self.inner.backtrace()
+    }
 }
 
 impl Display for RivetError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
-        write!(f, "RIVET error: {}", self.message)
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        Display::fmt(&self.inner, f)
     }
 }
 
-impl std::convert::From<std::io::Error> for RivetError {
-    fn from(error: std::io::Error) -> RivetError {
-        RivetError {
-            message: format!("IO error: {}", error),
-            kind: RivetErrorKind::IO,
-        }
+impl RivetError {
+    pub fn kind(&self) -> RivetErrorKind {
+        self.inner.get_context().clone()
     }
 }
 
-impl std::convert::From<std::num::ParseFloatError> for RivetError {
-    fn from(error: std::num::ParseFloatError) -> RivetError {
-        RivetError::new(format!("{}", error), RivetErrorKind::InputValidation)
+impl From<RivetErrorKind> for RivetError {
+    fn from(kind: RivetErrorKind) -> RivetError {
+        RivetError { inner: Context::new(kind) }
     }
 }
+
+impl From<Context<RivetErrorKind>> for RivetError {
+    fn from(inner: Context<RivetErrorKind>) -> RivetError {
+        RivetError { inner: inner }
+    }
+}
+
+//impl RivetError {
+//    pub fn new(message: String, kind: RivetErrorKind) -> RivetError {
+//        RivetError { message, kind }
+//    }
+//    pub fn validation(message: String) -> RivetError { RivetError{message, kind: RivetErrorKind::Validation }}
+//}
+
+//impl Display for RivetError {
+//    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+//        write!(f, "RIVET error: {}", self.message)
+//    }
+//}
+
+//impl std::convert::From<std::io::Error> for RivetError {
+//    fn from(error: std::io::Error) -> RivetError {
+//        RivetError {
+//            message: format!("IO error: {}", error),
+//            kind: RivetErrorKind::Io,
+//        }
+//    }
+//}
+//
+//impl std::convert::From<std::num::ParseFloatError> for RivetError {
+//    fn from(error: std::num::ParseFloatError) -> RivetError {
+//        RivetError::new(format!("{}", error), RivetErrorKind::Validation)
+//    }
+//}
 
 pub trait Saveable {
-    fn save(&self, writer: &mut Write) -> Result<(), RivetError>;
+    fn save(&self, writer: &mut Write) -> Result<(), std::io::Error>;
 }
 
 //TODO: make streaming version of the inputs for larger datasets
@@ -258,7 +305,7 @@ fn write_comments(writer: &mut Write, comments: &Vec<String>) -> Result<(), std:
 }
 
 impl Saveable for PointCloud {
-    fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
+    fn save(&self, writer: &mut Write) -> Result<(), std::io::Error> {
         write_comments(writer, &self.parameters.comment)?;
         writeln!(writer, "# dimensions: {}", self.parameters.distance_dimensions.join(","))?;
         writeln!(writer, "points")?;
@@ -312,7 +359,7 @@ impl MetricSpace {
 }
 
 impl Saveable for MetricSpace {
-    fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
+    fn save(&self, writer: &mut Write) -> Result<(), std::io::Error> {
         write_comments(writer, &self.parameters.comment)?;
         writeln!(writer, "metric")?;
         writeln!(writer, "{}", self.parameters.appearance_label.as_ref().unwrap_or(&"no function".to_string()))?;
@@ -358,7 +405,7 @@ pub enum RivetInputParameters {
 }
 
 impl Saveable for RivetInput {
-    fn save(&self, writer: &mut Write) -> Result<(), RivetError> {
+    fn save(&self, writer: &mut Write) -> Result<(), std::io::Error> {
         match self {
             RivetInput::Points(points) => points.save(writer),
             RivetInput::Metric(points) => points.save(writer)
@@ -377,15 +424,15 @@ pub struct ComputationParameters {
 }
 
 pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result<Vec<u8>, RivetError> {
-    let dir = TempDir::new("rivet-")?;
+    let dir = TempDir::new("rivet-").context(RivetErrorKind::Io)?;
     let input_path = dir.path().join("rivet-input.txt");
     let output_path = dir.path().join("rivet-output.rivet");
     {
-        let mut input_file = File::create(&input_path)?;
-        input.save(&mut input_file)?;
+        let mut input_file = File::create(&input_path).context(RivetErrorKind::Io)?;
+        input.save(&mut input_file).context(RivetErrorKind::Io)?;
     }
     {
-        let data = std::fs::read(&input_path)?;
+        let data = std::fs::read(&input_path).context(RivetErrorKind::Io)?;
         let check = String::from_utf8_lossy(data.as_slice());
         info!("Generated this file content: {}", check);
     }
@@ -408,47 +455,36 @@ pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result
             .arg(format!("{}", parameters.appearance_bins.unwrap()));
     }
     info!("Calling rivet_console: {:?}", command);
-    let output = command.output().expect("Failed to execute rivet_console process");
+    let output = command.output().context(RivetErrorKind::Io)?;
     info!("Console exited");
     let result = if output.status.success() {
         info!("Success - reading RIVET output file back into memory");
-        let bytes = std::fs::read(&output_path)?;
+        let bytes = std::fs::read(&output_path).context(RivetErrorKind::Io)?;
         info!("Success - returning {} bytes", bytes.len());
         Ok(bytes)
     } else {
         info!("Something went wrong");
         let message = String::from_utf8_lossy(&output.stderr).to_string();
         info!("Failure: {}", &message);
-        Err(RivetError {
-            message,
-            kind: RivetErrorKind::Computation,
-        })
+        Err(RivetErrorKind::Computation(message))
     }?;
-    dir.close()?;
+    dir.close().context(RivetErrorKind::Io)?;
     Ok(result)
 }
 
 pub fn parse(bytes: &[u8]) -> Result<ModuleInvariants, RivetError> {
     if bytes.len() == 0 {
-        Err(RivetError {
-            message: "Byte array must have non-zero length".to_string(),
-            kind: RivetErrorKind::InputValidation,
-        })
+        invalid("Byte array must have non-zero length")?
     } else {
         let rivet_comp = unsafe { read_rivet_computation(bytes.as_ptr(), bytes.len()) };
         if !rivet_comp.error.is_null() {
             let message = unsafe { CStr::from_ptr(rivet_comp.error) }
                 .to_owned()
-                .to_str()
-                .expect("Could not convert C string")
-                .to_string();
+                .to_str().context(RivetErrorKind::Io)?.to_string();
             unsafe {
                 free_rivet_computation_result(rivet_comp);
             }
-            Err(RivetError {
-                message: format!("Error while reading computation: {}", message),
-                kind: RivetErrorKind::IO,
-            })
+            Err(RivetErrorKind::Computation(format!("Error while reading computation: {}", message)))?
         } else {
             Ok(ModuleInvariants {
                 arr: rivet_comp.computation,
@@ -491,10 +527,7 @@ pub fn barcodes(
                 .expect("Could not convert C string")
                 .to_string();
             free_barcodes_result(cbars);
-            Err(RivetError {
-                message,
-                kind: RivetErrorKind::Computation,
-            })
+            Err(RivetErrorKind::Computation(message))?
         } else {
             for bc in 0..cbars.length {
                 let bcp = cbars.barcodes.offset(bc as isize);
@@ -588,10 +621,9 @@ pub fn parse_input<R:Read>(read: R) -> Result<RivetInput, RivetError> {
     let mut lines = reader.lines();
     loop {
         match lines.next() {
-            None => return Err(RivetError::new("Reached end of input file without determining file type".to_owned(),
-                                               RivetErrorKind::InputValidation)),
+            None => invalid("Reached end of input file without determining file type")?,
             Some(line) => {
-                let line = line?;
+                let line = line.context(RivetErrorKind::Io)?;
                 let clean = line.trim();
                 if clean.starts_with("#") {
                     comment.push(clean[1..].to_owned());
@@ -599,7 +631,7 @@ pub fn parse_input<R:Read>(read: R) -> Result<RivetInput, RivetError> {
                     file_type = Some(match clean {
                         "points" => Ok(FileType::PointCloud),
                         "metric" => Ok(FileType::Metric),
-                        other => Err(RivetError::new(format!("Unrecognized file type '{}'", other), RivetErrorKind::InputValidation))
+                        other => invalid(&format!("Unrecognized file type '{}'", other))
                     }?);
                     break;
                 }
@@ -615,7 +647,7 @@ pub fn parse_input<R:Read>(read: R) -> Result<RivetInput, RivetError> {
                 }
             });
     match file_type {
-        None => Err(RivetError::new("No file type found".to_owned(), RivetErrorKind::InputValidation)),
+        None => invalid("No file type found")?,
         Some(ft) => match ft {
             FileType::PointCloud => parse_pointcloud(&mut skip_comments, comment),
             FileType::Metric => parse_metric(&mut skip_comments, comment)
@@ -623,24 +655,33 @@ pub fn parse_input<R:Read>(read: R) -> Result<RivetInput, RivetError> {
     }
 }
 
-fn eof_error(msg: &str) -> RivetError {
-    RivetError::new(msg.to_string(), RivetErrorKind::InputValidation)
+//fn eof_error(msg: &str) -> RivetError {
+//    RivetError::new(msg.to_string(), RivetErrorKind::Validation)
+//}
+fn line_or(val: Option<Result<String, std::io::Error>>, message: &str) -> Result<String, RivetError> {
+    match val {
+        None => invalid(message),
+        Some(Ok(v)) => Ok(v),
+        Some(Err(e)) => Err(e).context(RivetErrorKind::Io)?
+    }
 }
 
 fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, comment: Vec<String>) -> Result<RivetInput, RivetError> {
-    let point_dim = buf.next().ok_or(eof_error("No dimension line!"))??;
-    let cutoff = r64((buf.next().ok_or(eof_error("No max distance!"))??).parse::<f64>()?);
-    let appearance_label = (buf.next().ok_or(eof_error("No label!"))?)?.to_string();
+    let point_dim = line_or(buf.next(), "No dimension line!")?;
+    let cutoff = r64(line_or(buf.next(),"No max distance!")?
+                         .parse::<f64>().context(RivetErrorKind::InvalidFloat)?);
+    let appearance_label = line_or(buf.next(), "No label!")?;
     let mut points = vec![];
     let mut appearance = vec![];
     loop {
         match buf.next() {
             None => break,
             Some(line) => {
-                let could_be_numbers = (line?).split_whitespace().map(|x| x.parse::<f64>()).collect_vec();
+                let line = line.context(RivetErrorKind::Io)?;
+                let could_be_numbers = line.split_whitespace().map(|x| x.parse::<f64>()).collect_vec();
                 let (f64s, errors): (Vec<Result<f64, _>>, _) = could_be_numbers.into_iter().partition(|x| x.is_ok());
                 for err in errors {
-                    err?;
+                    err.context(RivetErrorKind::InvalidFloat)?;
                 }
                 let numbers = f64s.into_iter().map(|x| r64(x.unwrap())).collect_vec();
                 points.push(numbers[0..numbers.len() - 1].to_vec());

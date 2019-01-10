@@ -10,6 +10,9 @@ extern crate rand;
 // extern crate time;
 extern crate num_iter;
 
+
+extern crate failure;
+
 #[macro_use]
 extern crate serde_derive;
 extern crate itertools;
