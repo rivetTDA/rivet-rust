@@ -412,8 +412,8 @@ impl Saveable for RivetInput {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ComputationParameters {
-    pub param1_bins: Option<u32>,
-    pub appearance_bins: Option<u32>,
+    pub param1_bins: u32,
+    pub appearance_bins: u32,
     //TODO: param1_scale: R64,
 //TODO: appearance_scale: R64,
     pub homology_dimension: u32,
@@ -442,15 +442,11 @@ pub fn compute(input: &RivetInput, parameters: &ComputationParameters) -> Result
         .arg("-H")
         .arg(format!("{}", parameters.homology_dimension))
         .arg("--num_threads")
-        .arg(format!("{}", std::cmp::max(parameters.threads, 1)));
-    if parameters.param1_bins.is_some() {
-        command.arg("-x")
-            .arg(format!("{}", parameters.param1_bins.unwrap()));
-    }
-    if parameters.appearance_bins.is_some() {
-        command.arg("-y")
-            .arg(format!("{}", parameters.appearance_bins.unwrap()));
-    }
+        .arg(format!("{}", std::cmp::max(parameters.threads, 1)))
+        .arg("-x")
+        .arg(format!("{}", parameters.param1_bins))
+        .arg("-y")
+        .arg(format!("{}", parameters.appearance_bins));
     info!("Calling rivet_console: {:?}", command);
     let output = command.output().context(RivetErrorKind::Io)?;
     info!("Console exited");
