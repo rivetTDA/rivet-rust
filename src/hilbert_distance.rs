@@ -60,6 +60,7 @@ pub struct Dimension {
     /// each of the upper bounds (i.e. upper_indexes is always the same length as upper_bounds).
     upper_indexes: Vec<Option<usize>>,
 }
+
 #[derive(Debug, Clone)]
 pub enum Interval {
     Open(R64, R64),
@@ -145,7 +146,7 @@ impl Interval {
 const DIMENSION_VERIFY: bool = false;
 
 impl Dimension {
-    pub fn new(lower_bound: R64, upper_bounds: Vec<R64>) -> Dimension {
+    pub fn new(lower_bound: R64, upper_bounds: Vec<R64>) -> Result<Dimension, RivetError> {
         let dim = if upper_bounds.len() == 0 {
             Dimension {
                 lower_bound,
@@ -153,7 +154,10 @@ impl Dimension {
                 upper_indexes: vec![Some(0)],
             }
         } else {
-            assert!(lower_bound <= upper_bounds[0]);
+            if lower_bound > upper_bounds[0] {
+                invalid(&format!("lower bound {} should be below upper bound {}",
+                                 lower_bound, upper_bounds[0]))?
+            }
             // assert sorted(list(upper_bounds)) == list(upper_bounds)
             let upper_indexes = (0..upper_bounds.len()).map(Some).collect_vec();
             Dimension {
@@ -164,14 +168,14 @@ impl Dimension {
         };
         //        println!("New verify {:?}", &dim);
         dim.verify();
-        dim
+        Ok(dim)
     }
 
     pub fn upper_bound(&self) -> R64 {
         *self.upper_bounds.last().unwrap()
     }
 
-    pub fn from_f64s(lower_bound: f64, upper_bounds: &[f64]) -> Dimension {
+    pub fn from_f64s(lower_bound: f64, upper_bounds: &[f64]) -> Result<Dimension, RivetError> {
         Dimension::new(
             r64(lower_bound),
             upper_bounds.iter().map(|&x| r64(x)).collect_vec(),
@@ -335,6 +339,7 @@ pub enum SampleType {
     MIN,
     MAX,
 }
+
 #[derive(Debug, Clone)]
 pub struct Rectangle {
     d0: Interval,
@@ -423,11 +428,11 @@ impl SplitMat {
                     .iter()
                     .filter(|x| x.is_some())
                     .map(|i| i.unwrap())
-                {
-                    assert!(upper_index < shape[dimension_number],
-                            format!("In dimension {}, dimension index {} is too big for matrix dimension {}",
-                                    dimension_number, upper_index, mat.shape()[dimension_number]))
-                }
+                    {
+                        assert!(upper_index < shape[dimension_number],
+                                format!("In dimension {}, dimension index {} is too big for matrix dimension {}",
+                                        dimension_number, upper_index, mat.shape()[dimension_number]))
+                    }
             }
         }
         SplitMat { mat, dimensions }
@@ -547,18 +552,18 @@ impl SplitMat {
             let (row_start, _) = row_interval.ends();
             while merged.dimensions[0].upper_bounds[min_merged_rows_for_template_rows[row]]
                 <= row_start
-            {
-                min_merged_rows_for_template_rows[row] += 1
-            }
+                {
+                    min_merged_rows_for_template_rows[row] += 1
+                }
         }
         for col in 1..template.dimensions[1].len() {
             let col_interval = &template_col_intervals[col];
             let (col_start, _) = col_interval.ends();
             while merged.dimensions[1].upper_bounds[min_merged_cols_for_template_cols[col]]
                 <= col_start
-            {
-                min_merged_cols_for_template_cols[col] += 1
-            }
+                {
+                    min_merged_cols_for_template_cols[col] += 1
+                }
         }
         let mut max_merged_rows_for_template_rows = min_merged_rows_for_template_rows.clone();
         let mut max_merged_cols_for_template_cols = min_merged_cols_for_template_cols.clone();
@@ -567,18 +572,18 @@ impl SplitMat {
             let (_, row_end) = row_interval.ends();
             while merged.dimensions[0].upper_bounds[max_merged_rows_for_template_rows[row]]
                 < row_end
-            {
-                max_merged_rows_for_template_rows[row] += 1
-            }
+                {
+                    max_merged_rows_for_template_rows[row] += 1
+                }
         }
         for col in 0..template.dimensions[1].len() {
             let col_interval = &template_col_intervals[col];
             let (_k, col_end) = col_interval.ends();
             while merged.dimensions[1].upper_bounds[max_merged_cols_for_template_cols[col]]
                 < col_end
-            {
-                max_merged_cols_for_template_cols[col] += 1
-            }
+                {
+                    max_merged_cols_for_template_cols[col] += 1
+                }
         }
 
         // Now that we know which regions we need to clip, the actual sampling is fairly straightforward:
@@ -628,9 +633,9 @@ impl SplitMat {
             for col in 0..self.dimensions[1].len() {
                 if self.dimensions[0].upper_indexes[row] == None
                     || self.dimensions[1].upper_indexes[col] == None
-                {
-                    vec.push(0);
-                } else {
+                    {
+                        vec.push(0);
+                    } else {
                     vec.push(
                         self.mat[[
                             self.dimensions[0].upper_indexes[row].unwrap(),
@@ -721,8 +726,8 @@ impl SplitMat {
             }
         }
         let dimensions = vec![
-            Dimension::new(unique_ys[0], unique_ys[1..].to_owned()),
-            Dimension::new(unique_xs[0], unique_xs[1..].to_owned()),
+            Dimension::new(unique_ys[0], unique_ys[1..].to_owned())?,
+            Dimension::new(unique_xs[0], unique_xs[1..].to_owned())?,
         ];
         assert_eq!(dimensions[0].len(), y_nonzero_lengths);
         assert_eq!(dimensions[1].len(), x_nonzero_lengths);
@@ -860,7 +865,7 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
 }
 
 pub fn fingerprint(structure: &BettiStructure,
-               template: &SplitMat) -> Result<Vec<f64>, RivetError> {
+                   template: &SplitMat) -> Result<Vec<f64>, RivetError> {
     let matrix = SplitMat::betti_to_splitmat(structure)?;
 
     let sample = matrix.sample(&template, SampleType::MEAN);
@@ -889,8 +894,8 @@ mod tests {
         let mut split = SplitMat::new(
             arr2(&[[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
             vec![
-                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
-                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
+                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]).unwrap(),
+                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]).unwrap(),
             ],
         );
 
@@ -900,12 +905,12 @@ mod tests {
         split.add_row(r64(1.5));
         assert_eq!(
             split.dimensions[0].upper_bounds,
-            Dimension::from_f64s(0., &vec![0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 1.5]).upper_bounds
+            Dimension::from_f64s(0., &vec![0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 1.5]).unwrap().upper_bounds
         );
         split.add_col(r64(0.4));
         assert_eq!(
             split.dimensions[1].upper_bounds,
-            Dimension::from_f64s(0., &vec![0.25, 0.4, 0.5, 1.0]).upper_bounds
+            Dimension::from_f64s(0., &vec![0.25, 0.4, 0.5, 1.0]).unwrap().upper_bounds
         );
 
         let expanded = split.expand();
@@ -929,8 +934,8 @@ mod tests {
         let split = SplitMat::new(
             arr2(&[[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
             vec![
-                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
-                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
+                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]).unwrap(),
+                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]).unwrap(),
             ],
         );
 
@@ -949,16 +954,16 @@ mod tests {
         let split = SplitMat::new(
             arr2(&[[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
             vec![
-                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
-                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]),
+                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]).unwrap(),
+                Dimension::from_f64s(0., &vec![0.25, 0.5, 1.0]).unwrap(),
             ],
         );
 
         let split2 = SplitMat::new(
             arr2(&[[1, 2], [3, 4]]),
             vec![
-                Dimension::from_f64s(0.2, &vec![0.25, 0.5]),
-                Dimension::from_f64s(0.2, &vec![0.25, 0.5]),
+                Dimension::from_f64s(0.2, &vec![0.25, 0.5]).unwrap(),
+                Dimension::from_f64s(0.2, &vec![0.25, 0.5]).unwrap(),
             ],
         );
 
@@ -1003,16 +1008,16 @@ mod tests {
         let split = SplitMat::new(
             arr2(&[[1, 2, 3], [2, 4, 6]]),
             vec![
-                Dimension::from_f64s(0., &vec![1.0, 2.0]),
-                Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]),
+                Dimension::from_f64s(0., &vec![1.0, 2.0]).unwrap(),
+                Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]).unwrap(),
             ],
         );
 
         let template = SplitMat::constant(
             0,
             vec![
-                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]),
-                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]),
+                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
+                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
             ],
         );
         let min = split.sample(&template, SampleType::MIN);
@@ -1027,16 +1032,16 @@ mod tests {
         let split = SplitMat::new(
             arr2(&[[1, 2, 3], [2, 4, 6]]),
             vec![
-                Dimension::from_f64s(0., &vec![1.0, 2.0]),
-                Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]),
+                Dimension::from_f64s(0., &vec![1.0, 2.0]).unwrap(),
+                Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]).unwrap(),
             ],
         );
 
         let template = SplitMat::constant(
             0,
             vec![
-                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]),
-                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]),
+                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
+                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
             ],
         );
         let max = split.sample(&template, SampleType::MAX);
@@ -1051,16 +1056,16 @@ mod tests {
         let split = SplitMat::new(
             arr2(&[[1, 2, 3], [2, 4, 6]]),
             vec![
-                Dimension::from_f64s(0., &vec![1.0, 2.0]),
-                Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]),
+                Dimension::from_f64s(0., &vec![1.0, 2.0]).unwrap(),
+                Dimension::from_f64s(0., &vec![1.0, 2.0, 3.0]).unwrap(),
             ],
         );
 
         let template = SplitMat::constant(
             0,
             vec![
-                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]),
-                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]),
+                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
+                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
             ],
         );
 
@@ -1083,7 +1088,7 @@ mod tests {
                 6.0 * 1.0 * 0.5,
             ],
         ])
-        .map(|&x| r64(x));
+            .map(|&x| r64(x));
         let expected = &values / &areas;
         assert_eq!(expected, mean);
     }
