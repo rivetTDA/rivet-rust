@@ -149,6 +149,10 @@ pub struct ModuleInvariants {
     arr: *mut RivetArrangement,
 }
 
+/// RIVET doesn't use thread locals or locking on arrangements in memory, they're
+/// read-only data
+unsafe impl Send for ModuleInvariants {}
+
 impl ModuleInvariants {
     pub fn from(data: &[u8]) -> Result<ModuleInvariants, RivetError> {
         parse(data)
