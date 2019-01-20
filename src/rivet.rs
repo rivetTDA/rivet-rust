@@ -98,6 +98,15 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    pub fn valid(&self) -> Result<&Bounds, RivetError> {
+        if self.x_low >= self.x_high {
+            Err(RivetErrorKind::Validation("Bounds invalid: x_low greater than or equal to x_high".to_owned()))?
+        } else if self.y_low >= self.y_high {
+            Err(RivetErrorKind::Validation("Bounds invalid: y_low greater than or equal to y_high".to_owned()))?
+        } else {
+            Ok(self)
+        }
+    }
     pub fn is_degenerate(&self) -> bool {
         self.x_low == self.x_high || self.y_low == self.y_high
     }

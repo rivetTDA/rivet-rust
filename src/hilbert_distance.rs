@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
-use crate::rivet::{BettiStructure, invalid, RivetError};
+use crate::rivet::{Bounds, BettiStructure, invalid, RivetError};
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -864,14 +864,58 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
     }
 }
 
+/// Creates a fingerprint for the given `structure`, given `bounds` that describe the
+/// domain of valid parameter values (and which must include the bounds of `structure`),
+/// and a `granularity` that determine how heavily to weight
+/// each parameter (by subdividing the structure more finely). The granularity of each parameter
+/// determines how many cells there will be in the resulting fingerprint.
+///
+/// For example:
+///
+/// Granularity         Effect
+/// (0, 0)              Error
+/// (1, 0) or (0, 1)    Single element vector with highest (or mean, or min) Betti number for the
+///                     whole structure
+/// (1, 5)              Five element vector that generalizes over the whole range of param 1, but
+///                     divides the structure into 5 pieces along param2, effectively making param 2
+///                     5 times more important than param 1 and losing all the information in param 1.
+/// (10, 10)            A 100-element vector that weights param1 and param2 evenly
 pub fn fingerprint(structure: &BettiStructure,
-                   template: &SplitMat) -> Result<Vec<f64>, RivetError> {
+                   bounds: &Bounds,
+                   granularity: (usize, usize)) -> Result<Vec<f64>, RivetError> {
+    let (y_bins, x_bins) = granularity;
+
+    let bounds = bounds.valid()?;
+
+    //First, generate a splitmat from the structure
     let matrix = SplitMat::betti_to_splitmat(structure)?;
 
-    let sample = matrix.sample(&template, SampleType::MEAN);
+    //Normalize it so its bounds are between 0 and 1 in both parameters
+    //TODO: change scale and translate to take tuples instead of vectors
+    let scaled = matrix.scale(&vec![
+        r64(1.0) / (bounds.y_high - bounds.y_low),
+        r64(1.0) / (bounds.x_high - bounds.x_low),
+    ]);
+    let translated = matrix.translate(&vec![
+         -scaled.dimensions[0].lower_bound,
+        -scaled.dimensions[1].lower_bound
+    ]);
+
+    //Now build a template with the right granularity for sampling
+    let y_dim = Dimension::from_f64s(0.0,
+        &Array::linspace(0.0, 1.0, y_bins).to_vec()[1..])?;
+    let x_dim = Dimension::from_f64s(0.0,
+        &Array::linspace(0.0, 1.0, x_bins).to_vec()[1..])?;
+    let template =
+        SplitMat::constant(0, vec![y_dim, x_dim]);
+
+    //Take our sample and convert it to a vector
+
+    let sample = translated.sample(&template, SampleType::MEAN);
     let shape = sample.shape();
     let mut vector = vec![0.0; shape[0] * shape[1]];
     let mut pos = 0;
+    //TODO: surely there's a method in ndarray for this?
     for row in 0..shape[0] {
         for col in 0..shape[1] {
             vector[pos] = sample[(row, col)].raw();
