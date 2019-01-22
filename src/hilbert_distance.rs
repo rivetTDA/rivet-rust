@@ -7,6 +7,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
 use std::ops;
+use log::warn;
 
 fn rational_to_r64(ratio: &Rational64) -> R64 {
     let num: f64 = *ratio.numer() as f64;
@@ -83,7 +84,7 @@ impl Interval {
         end_included: OpenClosed,
     ) -> Option<Interval> {
         use self::OpenClosed::*;
-        if start < end {
+        if start <= end {
             Some(match (start_included, end_included) {
                 (Open, Open) => Interval::Open(start, end),
                 (Closed, Closed) => Interval::Closed(start, end),
@@ -91,6 +92,15 @@ impl Interval {
                 (Closed, Open) => Interval::ClosedOpen(start, end),
             })
         } else {
+            let left = match start_included {
+                Open => "(",
+                Closed => "["
+            };
+            let right = match end_included {
+                Open => ")",
+                Closed => "]"
+            };
+            warn!("Not an interval: {}{},{},{}", left, start, end, right);
             None
         }
     }
@@ -138,7 +148,7 @@ impl Interval {
                     _ => OpenClosed::Open,
                 }
             };
-            Some(Interval::new(start, start_type, end, end_type).unwrap())
+            Interval::new(start, start_type, end, end_type)
         }
     }
 }
@@ -897,15 +907,15 @@ pub fn fingerprint(structure: &BettiStructure,
         r64(1.0) / (bounds.x_high - bounds.x_low),
     ]);
     let translated = matrix.translate(&vec![
-         -scaled.dimensions[0].lower_bound,
+        -scaled.dimensions[0].lower_bound,
         -scaled.dimensions[1].lower_bound
     ]);
 
     //Now build a template with the right granularity for sampling
     let y_dim = Dimension::from_f64s(0.0,
-        &Array::linspace(0.0, 1.0, y_bins).to_vec()[1..])?;
+                                     &Array::linspace(0.0, 1.0, y_bins).to_vec()[1..])?;
     let x_dim = Dimension::from_f64s(0.0,
-        &Array::linspace(0.0, 1.0, x_bins).to_vec()[1..])?;
+                                     &Array::linspace(0.0, 1.0, x_bins).to_vec()[1..])?;
     let template =
         SplitMat::constant(0, vec![y_dim, x_dim]);
 
