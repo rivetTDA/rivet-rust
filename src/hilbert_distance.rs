@@ -148,7 +148,9 @@ impl Interval {
                     _ => OpenClosed::Open,
                 }
             };
-            Interval::new(start, start_type, end, end_type)
+            Some(
+                Interval::new(start, start_type, end, end_type)
+                    .expect("Couldn't create interval!"))
         }
     }
 }
