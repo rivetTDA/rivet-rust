@@ -110,6 +110,13 @@ impl Bounds {
     pub fn is_degenerate(&self) -> bool {
         self.x_low == self.x_high || self.y_low == self.y_high
     }
+
+    pub fn contains(&self, other: &Bounds) -> bool {
+        self.y_low <= other.y_low
+        && self.x_low <= other.x_low
+        && self.y_high >= other.y_high
+        && self.x_high >= other.x_high
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

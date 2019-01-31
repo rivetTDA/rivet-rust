@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
-use crate::rivet::{Bounds, BettiStructure, invalid, RivetError};
+use crate::rivet::{Bounds, BettiStructure, invalid, RivetError, RivetErrorKind};
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -246,7 +246,7 @@ impl Dimension {
 
     fn scale(&self, factor: R64) -> Dimension {
         Dimension {
-            lower_bound: self.lower_bound * factor,
+            lower_bound: self.lower_bound,
             upper_bounds: self.upper_bounds.iter().map(|x| *x * factor).collect_vec(),
             upper_indexes: self.upper_indexes.clone(),
         }
@@ -547,10 +547,24 @@ impl SplitMat {
         results
     }
 
+    fn bounds(&self) -> Bounds {
+        Bounds {
+            x_low: self.dimensions[1].lower_bound.raw(),
+            y_low: self.dimensions[0].lower_bound.raw(),
+            x_high: self.dimensions[1].upper_bound().raw(),
+            y_high: self.dimensions[0].upper_bound().raw(),
+        }
+    }
+
+
+
     /// Returns a matrix with the same shape as the given template (the template should contain the
     /// dimensions of self for meaningful results), with values that are the weighted
     /// averages (or max, or min) of any values in self that fall in a cell of the template.
-    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Array2<R64> {
+    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Result<Array2<R64>, RivetError> {
+        if !template.bounds().contains(&self.bounds()) {
+            Err(RivetErrorKind::Validation(format!("Bounds of template {:#?} must include bounds of sample {:#?}", template.bounds(), self.bounds()).to_owned()))?;
+        }
         let merged = self.merge(template).expand();
         let template_row_intervals = template.dimensions[0].intervals();
         let template_col_intervals = template.dimensions[1].intervals();
@@ -636,7 +650,7 @@ impl SplitMat {
                 }
             }
         });
-        result
+        Ok(result)
     }
 
     fn expand(&self) -> SplitMat {
@@ -901,16 +915,21 @@ pub fn fingerprint(structure: &BettiStructure,
 
     //First, generate a splitmat from the structure
     let matrix = SplitMat::betti_to_splitmat(structure)?;
+    if !bounds.contains(&matrix.bounds()) {
+        Err(RivetErrorKind::Validation(
+            format!("Bounds {:#?} must enclose structure bounds {:#?}", bounds, matrix.bounds())
+                .to_owned()))?;
+    }
 
     //Normalize it so its bounds are between 0 and 1 in both parameters
     //TODO: change scale and translate to take tuples instead of vectors
-    let scaled = matrix.scale(&vec![
+    let translated = matrix.translate(&vec![
+        -matrix.dimensions[0].lower_bound,
+        -matrix.dimensions[1].lower_bound
+    ]);
+    let scaled = translated.scale(&vec![
         r64(1.0) / (bounds.y_high - bounds.y_low),
         r64(1.0) / (bounds.x_high - bounds.x_low),
-    ]);
-    let translated = matrix.translate(&vec![
-        -scaled.dimensions[0].lower_bound,
-        -scaled.dimensions[1].lower_bound
     ]);
 
     //Now build a template with the right granularity for sampling
@@ -923,7 +942,7 @@ pub fn fingerprint(structure: &BettiStructure,
 
     //Take our sample and convert it to a vector
 
-    let sample = translated.sample(&template, SampleType::MEAN);
+    let sample = scaled.sample(&template, SampleType::MEAN).unwrap();
     let shape = sample.shape();
     let mut vector = vec![0.0; shape[0] * shape[1]];
     let mut pos = 0;
@@ -944,6 +963,7 @@ mod tests {
     use crate::hilbert_distance::SplitMat;
     use ndarray::arr2;
     use noisy_float::types::r64;
+    use crate::hilbert_distance::fingerprint;
 
     #[test]
     fn expand() {
@@ -1076,7 +1096,7 @@ mod tests {
                 Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
             ],
         );
-        let min = split.sample(&template, SampleType::MIN);
+        let min = split.sample(&template, SampleType::MIN).unwrap();
         assert_eq!(
             min,
             arr2(&[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]).map(|&x| r64(x))
@@ -1100,7 +1120,7 @@ mod tests {
                 Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
             ],
         );
-        let max = split.sample(&template, SampleType::MAX);
+        let max = split.sample(&template, SampleType::MAX).unwrap();
         assert_eq!(
             max,
             arr2(&[[1.0, 3.0, 3.0], [1.0, 3.0, 3.0], [2.0, 6.0, 6.0]]).map(|&x| r64(x))
@@ -1125,7 +1145,7 @@ mod tests {
             ],
         );
 
-        let mean = split.sample(&template, SampleType::MEAN);
+        let mean = split.sample(&template, SampleType::MEAN).unwrap();
         let areas = template.regions().map(|r| r.rectangle.area());
         let values = arr2(&[
             [
@@ -1147,6 +1167,56 @@ mod tests {
             .map(|&x| r64(x));
         let expected = &values / &areas;
         assert_eq!(expected, mean);
+    }
+
+    #[test]
+    fn test_fingerprint() {
+        let input = "# Position coordinates are ['x', 'y', 'z']
+points
+3
+5.560900
+partial_charge
+-0.704200 -0.950600 -1.170700 -326215.946758
+0.000000 0.000000 0.000000 646900.163088
+3.029400 0.714600 -0.911600 -4965384.510770
+0.000000 0.000000 0.000000 329163.950870
+0.000000 0.000000 0.000000 329163.950870
+1.580200 -1.068500 -0.328500 -2185012.362106
+0.161000 -1.106700 -0.094100 669260.279575
+0.000000 0.000000 0.000000 329163.950870
+0.000000 0.000000 0.000000 2930920.967559
+0.000000 0.000000 0.000000 2944627.365759
+-0.357100 -0.674100 1.121300 -326215.946758
+1.903500 0.550600 1.340000 119085.079028
+-1.544700 0.048500 1.185000 -180827.702072
+0.000000 0.000000 0.000000 646900.163088
+0.000000 0.000000 0.000000 662605.402542
+2.281500 -0.024800 0.007700 1821429.378262
+-2.086400 0.600100 0.033900 1152301.053611
+-2.531500 1.925000 -0.024200 -5079642.937129
+0.000000 0.000000 0.000000 662605.402542
+-1.731600 -0.014100 -1.158700 -180827.702072
+        ";
+        use crate::rivet::{compute, parse, parse_input, ComputationParameters, structure, Bounds};
+        let rivet_input = parse_input(input.as_bytes()).unwrap();
+
+        let params = ComputationParameters {
+            param1_bins: 0,
+            appearance_bins: 0,
+            homology_dimension: 0,
+            threads: 1,
+        };
+        let bytes = compute(&rivet_input, &params).unwrap();
+        let results = parse(&bytes).unwrap();
+        let structure = structure(&results);
+        let bounds = Bounds {
+            x_low: -5080000.0,
+            y_low: 0.0,
+            x_high: 2950000.0,
+            y_high: 6.0,
+        };
+        let fp = fingerprint(&structure, &bounds, (5,5)).unwrap();
+        println!("Vector: {:#?}", fp);
     }
 }
 
