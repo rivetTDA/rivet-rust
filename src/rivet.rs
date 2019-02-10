@@ -188,8 +188,8 @@ impl Drop for ModuleInvariants {
 
 #[derive(Debug, Fail, Clone)]
 pub enum RivetErrorKind {
-    #[fail(display = "Invalid floating point number")]
-    InvalidFloat,
+    #[fail(display = "Invalid floating point number in string '{}'", _0)]
+    InvalidFloat(String),
 
     #[fail(display = "RIVET input validation failure: {}", _0)]
     Validation(String),
@@ -679,10 +679,14 @@ fn line_or(val: Option<Result<String, std::io::Error>>, message: &str) -> Result
     }
 }
 
+fn parse_r64(s: &str) -> Result<R64, RivetError> {
+    let float = s.parse::<f64>().context(RivetErrorKind::InvalidFloat(s.to_owned()))?;
+    Ok(r64(float))
+}
+
 fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, comment: Vec<String>) -> Result<RivetInput, RivetError> {
     let point_dim = line_or(buf.next(), "No dimension line!")?;
-    let cutoff = r64(line_or(buf.next(),"No max distance!")?
-                         .parse::<f64>().context(RivetErrorKind::InvalidFloat)?);
+    let cutoff = parse_r64(&line_or(buf.next(),"No max distance!")?)?;
     let appearance_label = line_or(buf.next(), "No label!")?;
     let mut points = vec![];
     let mut appearance = vec![];
@@ -694,7 +698,7 @@ fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, com
                 let could_be_numbers = line.split_whitespace().map(|x| x.parse::<f64>()).collect_vec();
                 let (f64s, errors): (Vec<Result<f64, _>>, _) = could_be_numbers.into_iter().partition(|x| x.is_ok());
                 for err in errors {
-                    err.context(RivetErrorKind::InvalidFloat)?;
+                    err.context(RivetErrorKind::InvalidFloat(line.clone()))?;
                 }
                 let numbers = f64s.into_iter().map(|x| r64(x.unwrap())).collect_vec();
                 points.push(numbers[0..numbers.len() - 1].to_vec());
