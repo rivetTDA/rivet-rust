@@ -137,7 +137,7 @@ struct ArrangementBounds {
 
 #[repr(C)]
 struct RivetModuleInvariants {
-    computation: *mut RivetArrangement,
+    computation: *const RivetArrangement,
     error: *const c_char,
     error_length: size_t,
 }
@@ -145,9 +145,9 @@ struct RivetModuleInvariants {
 #[link(name = "rivet")]
 extern "C" {
     fn read_rivet_computation(bytes: *const u8, length: size_t) -> RivetModuleInvariants;
-    fn bounds_from_computation(computation: *mut RivetArrangement) -> ArrangementBounds;
+    fn bounds_from_computation(computation: *const RivetArrangement) -> ArrangementBounds;
     fn barcodes_from_computation(
-        computation: *mut RivetArrangement,
+        computation: *const RivetArrangement,
         angles: *const f64,
         offsets: *const f64,
         query_length: size_t,
@@ -162,18 +162,24 @@ extern "C" {
 enum RivetArrangement {}
 
 pub struct ModuleInvariants {
-    arr: *mut RivetArrangement,
+    arr: *const RivetArrangement,
 }
 
 /// RIVET doesn't use thread locals or locking on arrangements in memory, they're
 /// read-only data
 unsafe impl Send for ModuleInvariants {}
+unsafe impl Sync for ModuleInvariants {}
+
+unsafe impl Send for RivetArrangement {}
+
+unsafe impl Sync for RivetArrangement {}
 
 impl ModuleInvariants {
     pub fn from(data: &[u8]) -> Result<ModuleInvariants, RivetError> {
         parse(data)
     }
 }
+
 impl Drop for ModuleInvariants {
     fn drop(&mut self) {
         unsafe {
