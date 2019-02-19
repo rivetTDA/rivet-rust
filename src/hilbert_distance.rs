@@ -733,10 +733,13 @@ impl SplitMat {
         }
         let x_nonzero_lengths = x_lengths.iter().filter(|&&x| x != r64(0.)).count();
         let y_nonzero_lengths = y_lengths.iter().filter(|&&y| y != r64(0.)).count();
-        if x_nonzero_lengths == 0 {
+        //If there's more than one interval, and they're all zero size, something's wrong
+        //If there's only one interval, and it's zero size, that's OK,
+        // it means everything happened at the same time.
+        if x_nonzero_lengths == 0 && x_lengths.len() != 1 {
             invalid("No nonzero x lengths")?;
         }
-        if y_nonzero_lengths == 0 {
+        if y_nonzero_lengths == 0 && y_lengths.len() != 1 {
             invalid("No nonzero y lengths")?;
         }
         let mut unique_ys = Vec::with_capacity(ys.len());
