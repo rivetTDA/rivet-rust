@@ -376,27 +376,6 @@ impl Rectangle {
     }
 }
 
-//pub struct Rectangle {
-//    pub position: (R64, R64),
-//    pub size: (R64, R64)
-//}
-//
-//impl Rectangle {
-//    pub fn from_points(position: (R64, R64), end_position: (R64, R64)) -> Option<Rectangle> {
-//        let (s1, s2) = position;
-//        let (e1, e2) = end_position;
-//        if s2 < s1 || e2 < e1 {
-//            None
-//        } else {
-//            Some(
-//                Rectangle {
-//                    position,
-//                    size: (s2 - s1, e2 - e1)
-//                }
-//            )
-//        }
-//    }
-//}
 #[derive(Debug, Clone)]
 pub struct Region {
     pub rectangle: Rectangle,
@@ -435,6 +414,7 @@ impl SplitMat {
                 "number of dimensions does not equal array shape length"
             );
             for dimension_number in 0..shape.len() {
+                assert!(shape[dimension_number] > 0, format!("Shape [{}] is {}, must be greater than zero!", dimension_number, shape[dimension_number]));
                 for upper_index in dimensions[dimension_number]
                     .upper_indexes
                     .iter()
@@ -758,9 +738,9 @@ impl SplitMat {
             Dimension::new(unique_ys[0], unique_ys[1..].to_owned())?,
             Dimension::new(unique_xs[0], unique_xs[1..].to_owned())?,
         ];
-        assert_eq!(dimensions[0].len(), y_nonzero_lengths);
-        assert_eq!(dimensions[1].len(), x_nonzero_lengths);
-        let mut mat = Array2::<i32>::zeros((y_nonzero_lengths, x_nonzero_lengths));
+//        assert_eq!(dimensions[0].len(), y_nonzero_lengths);
+//        assert_eq!(dimensions[1].len(), x_nonzero_lengths);
+        let mut mat = Array2::<i32>::zeros((std::cmp::max(1, y_nonzero_lengths), std::cmp::max(1, x_nonzero_lengths)));
         for point in betti.points.iter() {
             let mut x = point.x as isize;
             let mut y = point.y as isize;
@@ -791,7 +771,7 @@ impl SplitMat {
                 *x = 0
             }
         });
-        Ok(SplitMat { mat, dimensions })
+        Ok(SplitMat::new(mat, dimensions))
     }
 }
 
@@ -1217,6 +1197,56 @@ partial_charge
             y_low: 0.0,
             x_high: 2950000.0,
             y_high: 6.0,
+        };
+        let fp = fingerprint(&structure, &bounds, (5,5)).unwrap();
+        println!("Vector: {:#?}", fp);
+    }
+
+    #[test]
+    fn test_fingerprint_all_same_appearance() {
+        let input = "# Position coordinates are ['x', 'y', 'z']
+points
+3
+8.351691
+partial_charge
+3.675633 -0.687407 -1.038395 0.000001
+-3.645115 0.718542 1.098780 0.000001
+0.455147 -0.507637 -2.131605 0.000001
+0.005474 -0.817463 1.143883 0.000001
+-1.440597 -0.507598 -1.121448 0.000001
+-0.056372 -0.572285 -1.185440 0.000001
+1.493713 2.328843 -0.269277 0.000001
+-3.409179 1.402122 -0.515804 0.000001
+0.586079 -0.966693 2.043377 0.000001
+-1.990295 -0.357190 -2.033301 0.000001
+4.340086 -1.151104 -0.479742 0.000001
+-1.897091 -0.617916 2.161916 0.000001
+-2.069390 -0.220332 0.078135 0.000001
+2.990428 0.336292 1.556587 0.000001
+-1.370006 -0.626819 1.209674 0.000001
+2.476820 0.248684 -0.007394 0.000001
+2.363636 1.989549 -0.621067 0.000001
+-3.224753 0.600952 0.141173 0.000001
+0.715783 -0.592541 -0.030051 0.000001
+
+        ";
+        use crate::rivet::{compute, parse, parse_input, ComputationParameters, structure, Bounds};
+        let rivet_input = parse_input(input.as_bytes()).unwrap();
+
+        let params = ComputationParameters {
+            param1_bins: 0,
+            appearance_bins: 0,
+            homology_dimension: 0,
+            threads: 1,
+        };
+        let bytes = compute(&rivet_input, &params).unwrap();
+        let results = parse(&bytes).unwrap();
+        let structure = structure(&results);
+        let bounds = Bounds {
+            x_low: -1000.0,
+            y_low: 0.0,
+            x_high: 10000.0,
+            y_high: 10.0,
         };
         let fp = fingerprint(&structure, &bounds, (5,5)).unwrap();
         println!("Vector: {:#?}", fp);
