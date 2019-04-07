@@ -178,7 +178,6 @@ impl Dimension {
                 upper_indexes,
             }
         };
-        //        println!("New verify {:?}", &dim);
         dim.verify();
         Ok(dim)
     }
@@ -897,6 +896,7 @@ pub fn fingerprint(structure: &BettiStructure,
     let bounds = bounds.valid()?;
 
     //First, generate a splitmat from the structure
+
     let matrix = SplitMat::betti_to_splitmat(structure)?;
     if !bounds.contains(&matrix.bounds()) {
         Err(RivetErrorKind::Validation(
@@ -904,16 +904,33 @@ pub fn fingerprint(structure: &BettiStructure,
                 .to_owned()))?;
     }
 
+
     //Normalize it so its bounds are between 0 and 1 in both parameters
     //TODO: change scale and translate to take tuples instead of vectors
     let translated = matrix.translate(&vec![
         -matrix.dimensions[0].lower_bound,
         -matrix.dimensions[1].lower_bound
     ]);
-    let scaled = translated.scale(&vec![
+    let mut scaled = translated.scale(&vec![
         r64(1.0) / (bounds.y_high - bounds.y_low),
         r64(1.0) / (bounds.x_high - bounds.x_low),
     ]);
+    //TODO: The following is a hack. What we actually need here is to understand the bounds
+    //in greater detail than the current structure supports. That is, we need bounds
+    //that are more like Dimensions, so we know what the "tab stops" are, even if we haven't got
+    //any data that cross even one of them. Then we could set the upper bound to the tab stop
+    //above where we have data before scaling the splitmat, and get reasonable results.
+    //Here's the hack: if either dimension is width zero, treat it as width 1 instead. Otherwise structures
+    //that do have values (but do not vary, e.g. if the second parameter is constant)
+    // will be incorrectly assessed as empty
+    for d in &mut scaled.dimensions {
+        if d.lower_bound == d.upper_bound() {
+            d.lower_bound = r64(0.0);
+            d.upper_bounds[0] = r64(1.0);
+        }
+
+    }
+
 
     //Now build a template with the right granularity for sampling
     let y_dim = Dimension::from_f64s(0.0,
