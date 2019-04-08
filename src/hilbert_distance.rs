@@ -926,7 +926,7 @@ pub fn fingerprint(structure: &BettiStructure,
     for d in &mut scaled.dimensions {
         if d.lower_bound == d.upper_bound() {
             d.lower_bound = r64(0.0);
-            d.upper_bounds[0] = r64(1.0);
+            d.upper_bounds[0] = r64(1.0 - std::f64::EPSILON);
         }
 
     }
