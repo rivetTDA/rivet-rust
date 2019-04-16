@@ -91,31 +91,34 @@ pub struct BettiStructure {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Bounds {
-    pub x_low: f64,
-    pub y_low: f64,
-    pub x_high: f64,
-    pub y_high: f64,
+    rect: Rectangle
 }
 
 impl Bounds {
-    pub fn valid(&self) -> Result<&Bounds, RivetError> {
-        if self.x_low >= self.x_high {
-            Err(RivetErrorKind::Validation("Bounds invalid: x_low greater than or equal to x_high".to_owned()))?
-        } else if self.y_low >= self.y_high {
-            Err(RivetErrorKind::Validation("Bounds invalid: y_low greater than or equal to y_high".to_owned()))?
-        } else {
-            Ok(self)
-        }
+    pub fn new(y_low: f64, y_high: f64, x_low: f64, x_high: f64) -> Option<Bounds> {
+        let rect = Rectangle::closed(
+            (r64(y_low), r64(x_low)),
+            (r64(x_low), r64(x_low)),
+        )?;
+        Some(Bounds { rect })
     }
-    pub fn is_degenerate(&self) -> bool {
-        self.x_low == self.x_high || self.y_low == self.y_high
+}
+
+impl Rectangular for Bounds {
+    fn d0(&self) -> Interval {
+        self.rect.d0()
     }
 
-    pub fn contains(&self, other: &Bounds) -> bool {
-        self.y_low <= other.y_low
-            && self.x_low <= other.x_low
-            && self.y_high >= other.y_high
-            && self.x_high >= other.x_high
+    fn d1(&self) -> Interval {
+        self.rect.d1()
+    }
+
+    fn scale(&self, scales: (R64, R64)) -> Self {
+        Bounds { rect: self.rect.scale(scales) }
+    }
+
+    fn translate(&self, offsets: (R64, R64)) -> Self {
+        Bounds { rect: self.rect.translate(offsets) }
     }
 }
 
@@ -137,7 +140,7 @@ pub struct Dimension {
     pub upper_indexes: Vec<Option<usize>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Interval {
     Open(R64, R64),
     Closed(R64, R64),
@@ -145,7 +148,7 @@ pub enum Interval {
     ClosedOpen(R64, R64),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpenClosed {
     Open,
     Closed,
@@ -188,6 +191,12 @@ impl Interval {
             Interval::ClosedOpen(start, end) => (*start, *end),
         }
     }
+
+    pub fn len(&self) -> R64 {
+        let ends = self.ends();
+        ends.1 - ends.0
+    }
+
     pub fn end_types(&self) -> (OpenClosed, OpenClosed) {
         match self {
             Interval::Open(_, _) => (OpenClosed::Open, OpenClosed::Open),
@@ -228,7 +237,68 @@ impl Interval {
                     .expect("Couldn't create interval!"))
         }
     }
+
+
+    pub fn union(&self, other: &Interval) -> Interval {
+        let (self_start, self_end) = self.ends();
+        let (other_start, other_end) = other.ends();
+        let start = std::cmp::min(self_start, other_start);
+        let end = std::cmp::max(self_end, other_end);
+        let (self_start_type, self_end_type) = self.end_types();
+        let (other_start_type, other_end_type) = other.end_types();
+        let start_type = if self_start < other_start {
+            self_start_type
+        } else if other_start < self_start {
+            other_start_type
+        } else if other_start_type == OpenClosed::Closed || self_start_type == OpenClosed::Closed {
+            OpenClosed::Closed
+        } else {
+            OpenClosed::Open
+        };
+        let end_type = if self_end > other_end {
+            self_end_type
+        } else if other_end > self_end {
+            other_end_type
+        } else if other_end_type == OpenClosed::Closed || self_end_type == OpenClosed::Closed {
+            OpenClosed::Closed
+        } else {
+            OpenClosed::Open
+        };
+        Interval::new(start, start_type, end, end_type)
+            .expect("Couldn't create interval!")
+    }
+
+    pub fn contains(&self, other: &Interval) -> bool {
+        match self.intersection(other) {
+            None => false,
+            Some(inter) => inter == *other
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let (start, end) = self.ends();
+        start == end
+    }
+
+    pub fn scale(&self, scale: R64) -> Interval {
+        match &self {
+            Interval::Closed(s, e) => Interval::Closed(s.clone(), *e * scale),
+            Interval::OpenClosed(s, e) => Interval::OpenClosed(s.clone(), *e * scale),
+            Interval::ClosedOpen(s, e) => Interval::ClosedOpen(s.clone(), *e * scale),
+            Interval::Open(s, e) => Interval::Open(s.clone(), *e * scale)
+        }
+    }
+
+    pub fn translate(&self, offset: R64) -> Interval {
+        match &self {
+            Interval::Closed(s, e) => Interval::Closed(*s + offset, *e + offset),
+            Interval::OpenClosed(s, e) => Interval::OpenClosed(*s + offset, *e + offset),
+            Interval::ClosedOpen(s, e) => Interval::ClosedOpen(*s + offset, *e + offset),
+            Interval::Open(s, e) => Interval::Open(*s + offset, *e + offset)
+        }
+    }
 }
+
 const DIMENSION_VERIFY: bool = false;
 
 impl Dimension {
@@ -423,12 +493,34 @@ pub fn is_sorted<T: Ord>(thing: &[T]) -> bool {
 }
 
 pub trait Rectangular {
-    fn start() -> (R64, R64);
-    fn end() -> (R64, R64);
+    fn d0(&self) -> Interval;
+    fn d1(&self) -> Interval;
 
+    fn intersection<R: Rectangular>(&self, other: &R) -> Option<Rectangle> {
+        let d0 = self.d0().intersection(&other.d0())?;
+        let d1 = self.d1().intersection(&other.d1())?;
+        Some(Rectangle { d0, d1 })
+    }
+
+    fn area(&self) -> R64 {
+        let (start0, end0) = self.d0().ends();
+        let (start1, end1) = self.d1().ends();
+        (end0 - start0) * (end1 - start1)
+    }
+
+    fn contains<R: Rectangular>(&self, other: &R) -> bool {
+        self.d0().contains(&other.d0()) && self.d1().contains(&other.d1())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.d0().is_empty() && self.d1().is_empty()
+    }
+
+    fn scale(&self, scales: (R64, R64)) -> Self;
+    fn translate(&self, offsets: (R64, R64)) -> Self;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Rectangle {
     pub d0: Interval,
     pub d1: Interval,
@@ -445,17 +537,29 @@ impl Rectangle {
             d1: Interval::new(d1.0, OpenClosed::Closed, d1.1, OpenClosed::Closed)?,
         })
     }
+}
 
-    pub fn intersection(&self, other: &Rectangle) -> Option<Rectangle> {
-        let d0 = self.d0.intersection(&other.d0)?;
-        let d1 = self.d1.intersection(&other.d1)?;
-        Some(Rectangle { d0, d1 })
+impl Rectangular for Rectangle {
+    fn d0(&self) -> Interval {
+        self.d0.clone()
     }
 
-    pub fn area(&self) -> R64 {
-        let (start0, end0) = self.d0.ends();
-        let (start1, end1) = self.d1.ends();
-        (end0 - start0) * (end1 - start1)
+    fn d1(&self) -> Interval {
+        self.d1.clone()
+    }
+
+    fn scale(&self, scales: (R64, R64)) -> Self {
+        Rectangle {
+            d0: self.d0.scale(scales.0),
+            d1: self.d1.scale(scales.1),
+        }
+    }
+
+    fn translate(&self, offsets: (R64, R64)) -> Self {
+        Rectangle {
+            d0: self.d0.translate(offsets.0),
+            d1: self.d1.translate(offsets.1),
+        }
     }
 }
 
@@ -471,7 +575,7 @@ impl Region {
     }
 
     pub fn intersection(&self, other: &Rectangle) -> Option<Region> {
-        self.rectangle.intersection(&other).map(|rect| Region {
+        self.rectangle.intersection(other).map(|rect| Region {
             rectangle: rect,
             value: self.value,
         })
@@ -480,37 +584,62 @@ impl Region {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GradedBounds {
-    pub bounds: Bounds,
     pub x: Dimension,
-    pub y: Dimension
+    pub y: Dimension,
 }
 
 impl GradedBounds {
     pub fn valid(&self) -> Result<&GradedBounds, RivetError> {
-        self.bounds.valid().and_then(|_| {
-            self.x.valid()
-        }).and_then(|_| {
-            self.y.valid()
-        }).and_then(|_| {
-            Ok(self)
-        })
+        self.x.valid()
+            .and_then(|_| {
+                self.y.valid()
+            })
+            .and_then(|_| {
+                Ok(self)
+            })
     }
 
-    pub fn scale(&self, factors: &[R64]) -> GradedBounds {
-        assert_eq!(factors.len(), 2);
-        return GradedBounds {
-            bounds: self.bounds,
-            y: self.y.scale(factors[0]),
-            x: self.x.scale(factors[1])
+    pub fn common_bounds(self: &GradedBounds, other: &GradedBounds) -> GradedBounds {
+        GradedBounds{
+            x: self.x.merge(&other.x),
+            y: self.y.merge(&other.y)
         }
     }
 
-    pub fn translate(&self, offsets: &[R64]) -> GradedBounds {
-        assert_eq!(offsets.len(), 2);
-        return GradedBounds {
-            bounds: self.bounds,
-            y: self.y.translate(offsets[0]),
-            x: self.x.translate(offsets[1])
+    pub fn rectangles(&self) -> Array2<Rectangle> {
+        let d0_ints = self.y.intervals();
+        let d1_ints = self.x.intervals();
+        let results =
+            Array2::from_shape_fn((d0_ints.len(), d1_ints.len()), |(row_idx, col_idx)| {
+                    Rectangle {
+                        d0: d0_ints[row_idx].clone(),
+                        d1: d1_ints[col_idx].clone(),
+                    }
+                });
+        results
+    }
+}
+
+impl Rectangular for GradedBounds {
+    fn d0(&self) -> Interval {
+        Interval::Closed(self.y.lower_bound, self.y.upper_bound())
+    }
+
+    fn d1(&self) -> Interval {
+        Interval::Closed(self.x.lower_bound, self.x.upper_bound())
+    }
+
+    fn scale(&self, scales: (R64, R64)) -> Self {
+        GradedBounds {
+            y: self.y.scale(scales.0),
+            x: self.x.scale(scales.1),
+        }
+    }
+
+    fn translate(&self, offsets: (R64, R64)) -> Self {
+        GradedBounds {
+            y: self.y.translate(offsets.0),
+            x: self.x.translate(offsets.1),
         }
     }
 }
@@ -525,6 +654,7 @@ pub struct BarCode {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct ArrangementBounds {
     x_low: f64,
     y_low: f64,
@@ -565,6 +695,7 @@ pub struct ModuleInvariants {
 /// RIVET doesn't use thread locals or locking on arrangements in memory, they're
 /// read-only data
 unsafe impl Send for ModuleInvariants {}
+
 unsafe impl Sync for ModuleInvariants {}
 
 unsafe impl Send for RivetArrangement {}
@@ -714,7 +845,6 @@ impl PointCloud {
         }
         max.sqrt()
     }
-
 }
 
 fn write_comments(writer: &mut Write, comments: &Vec<String>) -> Result<(), std::io::Error> {
@@ -913,12 +1043,12 @@ pub fn bounds(computation: &ModuleInvariants) -> Bounds {
     unsafe {
         let res = bounds_from_computation(computation.arr);
 
-        Bounds {
-            x_low: res.x_low,
-            y_low: res.y_low,
-            x_high: res.x_high,
-            y_high: res.y_high,
-        }
+        Bounds::new(
+            res.y_low,
+            res.y_high,
+            res.x_low,
+            res.x_high,
+        ).expect(&format!("RIVET returned invalid bounds {:#?}", &res))
     }
 }
 
@@ -1016,16 +1146,15 @@ impl ModuleInvariants {
 
 impl Bounds {
     pub fn common_bounds(self: &Bounds, other: &Bounds) -> Bounds {
+        let d0 = self.d0().union(&other.d0());
+        let d1 = self.d1().union(&other.d1());
         Bounds {
-            x_low: f64::min(self.x_low, other.x_low),
-            y_low: f64::min(self.y_low, other.y_low),
-            x_high: f64::max(self.x_high, other.x_high),
-            y_high: f64::max(self.y_high, other.y_high),
+            rect: Rectangle { d0, d1 },
         }
     }
 }
 
-pub fn parse_input<R:Read>(read: R) -> Result<RivetInput, RivetError> {
+pub fn parse_input<R: Read>(read: R) -> Result<RivetInput, RivetError> {
     let reader = BufReader::new(read);
     let mut comment = vec![];
     enum FileType {
@@ -1089,7 +1218,7 @@ fn parse_r64(s: &str) -> Result<R64, RivetError> {
 
 fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, comment: Vec<String>) -> Result<RivetInput, RivetError> {
     let point_dim = line_or(buf.next(), "No dimension line!")?;
-    let cutoff = parse_r64(&line_or(buf.next(),"No max distance!")?)?;
+    let cutoff = parse_r64(&line_or(buf.next(), "No max distance!")?)?;
     let appearance_label = line_or(buf.next(), "No label!")?;
     let mut points = vec![];
     let mut appearance = vec![];

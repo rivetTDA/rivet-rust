@@ -3,7 +3,7 @@ use ndarray::prelude::*;
 use noisy_float::prelude::*;
 use num_rational::Rational64;
 use crate::rivet::{Bounds, BettiStructure, invalid, RivetError, RivetErrorKind, Dimension, Region,
-                   DimensionQueryResult, Rectangle, is_sorted, GradedBounds};
+                   DimensionQueryResult, Rectangle, is_sorted, GradedBounds, Rectangular};
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
@@ -44,7 +44,6 @@ impl Hash for HashableR64 {
 struct HashableR64 {
     value: R64,
 }
-
 
 
 /// A virtual matrix with both discrete and real-valued indices, and integer values. A SplitMat
@@ -127,40 +126,39 @@ impl SplitMat {
         self.dimensions[1].add_bound(first_length);
     }
 
-    fn scale(&self, factors: &[R64]) -> SplitMat {
-        assert_eq!(factors.len(), self.dimensions.len());
-        return SplitMat {
+    fn scale(&self, factors: (R64, R64)) -> SplitMat {
+        SplitMat {
             mat: self.mat.clone(),
-            dimensions: self
-                .dimensions
-                .iter()
-                .zip(factors.iter())
-                .map(|(d, f)| d.scale(*f))
-                .collect_vec(),
-        };
+            dimensions: vec![
+                self.dimensions[0].scale(factors.0),
+                self.dimensions[1].scale(factors.1)
+            ]
+        }
     }
 
-    fn translate(&self, offsets: &[R64]) -> SplitMat {
-        assert_eq!(offsets.len(), self.dimensions.len());
-        return SplitMat {
+    fn translate(&self, offsets: (R64, R64)) -> SplitMat {
+        SplitMat {
             mat: self.mat.clone(),
-            dimensions: self
-                .dimensions
-                .iter()
-                .zip(offsets.iter())
-                .map(|(d, f)| d.translate(*f))
-                .collect_vec(),
-        };
+            dimensions: vec![
+                self.dimensions[0].translate(offsets.0),
+                self.dimensions[1].translate(offsets.1)
+            ]
+        }
     }
 
-    fn merge(&self, rhs: &SplitMat) -> SplitMat {
-        let left_dims = self
-            .dimensions
-            .iter()
-            .zip(rhs.dimensions.iter())
-            .map(|(x, y)| x.merge(y))
-            .collect_vec();
+    fn merge(&self, rhs: &GradedBounds) -> SplitMat {
+        let left_dims = vec![
+            self.dimensions[0].merge(&rhs.y),
+            self.dimensions[1].merge(&rhs.x)
+            ];
         SplitMat::new(self.mat.clone(), left_dims)
+    }
+
+    fn graded_bounds(&self) -> GradedBounds {
+        GradedBounds {
+            y: self.dimensions[0].clone(),
+            x: self.dimensions[1].clone()
+        }
     }
 
     fn value(&self, point: (R64, R64)) -> Option<i32> {
@@ -195,32 +193,31 @@ impl SplitMat {
     }
 
     fn bounds(&self) -> Bounds {
-        Bounds {
-            x_low: self.dimensions[1].lower_bound.raw(),
-            y_low: self.dimensions[0].lower_bound.raw(),
-            x_high: self.dimensions[1].upper_bound().raw(),
-            y_high: self.dimensions[0].upper_bound().raw(),
-        }
+        Bounds::new(
+            self.dimensions[0].lower_bound.raw(),
+            self.dimensions[0].upper_bound().raw(),
+            self.dimensions[1].lower_bound.raw(),
+            self.dimensions[1].upper_bound().raw(),
+        ).unwrap() // We already know the bounds are valid
     }
-
 
 
     /// Returns a matrix with the same shape as the given template (the template should contain the
     /// dimensions of self for meaningful results), with values that are the weighted
     /// averages (or max, or min) of any values in self that fall in a cell of the template.
-    pub fn sample(&self, template: &SplitMat, sample_type: SampleType) -> Result<Array2<R64>, RivetError> {
-        if !template.bounds().contains(&self.bounds()) {
-            Err(RivetErrorKind::Validation(format!("Bounds of template {:#?} must include bounds of sample {:#?}", template.bounds(), self.bounds()).to_owned()))?;
+    pub fn sample(&self, template: &GradedBounds, sample_type: SampleType) -> Result<Array2<R64>, RivetError> {
+        if !template.contains(&self.graded_bounds()) {
+            Err(RivetErrorKind::Validation(format!("Bounds of template {:#?} must include bounds of sample {:#?}", template, self.graded_bounds()).to_owned()))?;
         }
         let merged = self.merge(template).expand();
-        let template_row_intervals = template.dimensions[0].intervals();
-        let template_col_intervals = template.dimensions[1].intervals();
+        let template_row_intervals = template.y.intervals();
+        let template_col_intervals = template.x.intervals();
         // To avoid a many-many comparison between all the regions in merged and all the regions in template,
         // we first figure out which indices in merged might have regions that overlap with the regions
         // for each row and column in template
-        let mut min_merged_rows_for_template_rows = vec![0; template.dimensions[0].len()];
-        let mut min_merged_cols_for_template_cols = vec![0; template.dimensions[1].len()];
-        for row in 1..template.dimensions[0].len() {
+        let mut min_merged_rows_for_template_rows = vec![0; template.y.len()];
+        let mut min_merged_cols_for_template_cols = vec![0; template.x.len()];
+        for row in 1..template.y.len() {
             let row_interval = &template_row_intervals[row];
             let (row_start, _) = row_interval.ends();
             while merged.dimensions[0].upper_bounds[min_merged_rows_for_template_rows[row]]
@@ -229,7 +226,7 @@ impl SplitMat {
                     min_merged_rows_for_template_rows[row] += 1
                 }
         }
-        for col in 1..template.dimensions[1].len() {
+        for col in 1..template.x.len() {
             let col_interval = &template_col_intervals[col];
             let (col_start, _) = col_interval.ends();
             while merged.dimensions[1].upper_bounds[min_merged_cols_for_template_cols[col]]
@@ -240,7 +237,7 @@ impl SplitMat {
         }
         let mut max_merged_rows_for_template_rows = min_merged_rows_for_template_rows.clone();
         let mut max_merged_cols_for_template_cols = min_merged_cols_for_template_cols.clone();
-        for row in 0..template.dimensions[0].len() {
+        for row in 0..template.y.len() {
             let row_interval = &template_row_intervals[row];
             let (_, row_end) = row_interval.ends();
             while merged.dimensions[0].upper_bounds[max_merged_rows_for_template_rows[row]]
@@ -249,7 +246,7 @@ impl SplitMat {
                     max_merged_rows_for_template_rows[row] += 1
                 }
         }
-        for col in 0..template.dimensions[1].len() {
+        for col in 0..template.x.len() {
             let col_interval = &template_col_intervals[col];
             let (_k, col_end) = col_interval.ends();
             while merged.dimensions[1].upper_bounds[max_merged_cols_for_template_cols[col]]
@@ -261,7 +258,7 @@ impl SplitMat {
 
         // Now that we know which regions we need to clip, the actual sampling is fairly straightforward:
         let merged_regions = merged.regions();
-        let result = Array2::from_shape_fn(template.shape(), |(row, col)| {
+        let result = Array2::from_shape_fn(Dim([template.y.len(), template.x.len()]), |(row, col)| {
             let cell_regions = merged_regions
                 .slice(s![
                     min_merged_rows_for_template_rows[row]
@@ -446,8 +443,8 @@ impl<'a, 'b> ops::Add<&'b SplitMat> for &'a SplitMat {
     type Output = SplitMat;
 
     fn add(self, rhs: &SplitMat) -> Self::Output {
-        let left = self.merge(rhs).expand();
-        let right = rhs.merge(self).expand();
+        let left = self.merge(&rhs.graded_bounds()).expand();
+        let right = rhs.merge(&self.graded_bounds()).expand();
         if left.mat.shape() != right.mat.shape() {
             error!(
                 "Merged splitmat shapes don't match!
@@ -472,8 +469,8 @@ impl<'a> ops::Add<SplitMat> for &'a SplitMat {
     type Output = SplitMat;
 
     fn add(self, rhs: SplitMat) -> Self::Output {
-        let left = self.merge(&rhs).expand();
-        let right = rhs.merge(self).expand();
+        let left = self.merge(&rhs.graded_bounds()).expand();
+        let right = rhs.merge(&self.graded_bounds()).expand();
         if left.mat.shape() != right.mat.shape() {
             println!(
                 "Merged splitmat shapes don't match!
@@ -500,8 +497,8 @@ impl ops::Add for SplitMat {
     type Output = SplitMat;
 
     fn add(self, rhs: SplitMat) -> Self::Output {
-        let left = self.merge(&rhs).expand();
-        let right = rhs.merge(&self).expand();
+        let left = self.merge(&rhs.graded_bounds()).expand();
+        let right = rhs.merge(&self.graded_bounds()).expand();
 
         SplitMat {
             mat: left.mat + right.mat,
@@ -561,58 +558,58 @@ pub fn fingerprint(structure: &BettiStructure,
                    granularity: (usize, usize)) -> Result<Vec<f64>, RivetError> {
     let (y_bins, x_bins) = granularity;
 
-    let graded_bounds = bounds.valid()?;
+    let bounds = bounds.valid()?;
 
     //First, generate a splitmat from the structure
 
     let matrix = SplitMat::betti_to_splitmat(structure)?;
-    if !graded_bounds.bounds.contains(&matrix.bounds()) {
+    if !bounds.contains(&matrix.bounds()) {
         Err(RivetErrorKind::Validation(
-            format!("Bounds {:#?} must enclose structure bounds {:#?}", graded_bounds, matrix.bounds())
+            format!("Bounds {:#?} must enclose structure bounds {:#?}", bounds, matrix.bounds())
                 .to_owned()))?;
     }
 
+    let range_upper_bound = r64(1.0);
 
-    //Normalize it so the system bounds are between 0 and 1 in both parameters
-    //TODO: change scale and translate to take tuples instead of vectors
-    let shift = vec![-bounds.y.lower_bound, -bounds.x.lower_bound];
-    let shifted_bounds = graded_bounds.translate(&shift);
-    let translated = matrix.translate(&shift);
-    let scale = &vec![
-        r64(1.0) / (graded_bounds.bounds.y_high - graded_bounds.bounds.y_low),
-        r64(1.0) / (graded_bounds.bounds.x_high - graded_bounds.bounds.x_low),
-    ];
-    let scaled_bounds = shifted_bounds.scale(scale);
-    let mut scaled = translated.scale(scale);
+    //Normalize it so the system bounds are between 0 and range_upper_bound in both parameters
+    let shift = (-bounds.y.lower_bound, -bounds.x.lower_bound);
+    let scale = (
+        range_upper_bound / (bounds.y.upper_bound() - bounds.y.lower_bound),
+        range_upper_bound / (bounds.x.upper_bound() - bounds.x.lower_bound),
+    );
+    let mut matrix = matrix
+        // Move matrix into the larger context:
+        .merge(bounds)
+        // Scale and translate so everything is in a known range
+        .translate(shift)
+        .scale(scale);
 
-    //TODO: The following is a hack. What we actually need here is to understand the bounds
-    //in greater detail than the current structure supports. That is, we need bounds
-    //that are more like Dimensions, so we know what the grades or "tab stops" are, even if we haven't got
-    //any data that cross even one of them. Then we could set the upper bound to the grade
-    //above where we have data before scaling the splitmat, and get reasonable results.
-    //Here's the hack: if either dimension is width zero, treat it as width 1 instead. Otherwise structures
-    //that do have values (but do not vary, e.g. if the second parameter is constant)
-    // will be incorrectly assessed as empty
-    for d in &mut scaled.dimensions {
-        if d.lower_bound == d.upper_bound() {
-            d.lower_bound = r64(0.0);
-            d.upper_bounds[0] = r64(1.0 - std::f64::EPSILON);
-        }
-
-    }
+//    //TODO: The following is a hack. What we actually need here is to understand the bounds
+//    //in greater detail than the current structure supports. That is, we need bounds
+//    //that are more like Dimensions, so we know what the grades or "tab stops" are, even if we haven't got
+//    //any data that cross even one of them. Then we could set the upper bound to the grade
+//    //above where we have data before scaling the splitmat, and get reasonable results.
+//    //Here's the hack: if either dimension is width zero, treat it as width 1 instead. Otherwise structures
+//    //that do have values (but do not vary, e.g. if the second parameter is constant)
+//    // will be incorrectly assessed as empty
+//    for d in &mut matrix.dimensions {
+//        if d.lower_bound == d.upper_bound() {
+//            d.lower_bound = r64(0.0);
+//            d.upper_bounds[0] = r64(range_upper_bound - std::f64::EPSILON);
+//        }
+//    }
 
 
     //Now build a template with the right granularity for sampling
     let y_dim = Dimension::from_f64s(0.0,
-                                     &Array::linspace(0.0, 1.0, y_bins).to_vec()[1..])?;
+                                     &Array::linspace(0.0, range_upper_bound.raw(), y_bins).to_vec()[1..])?;
     let x_dim = Dimension::from_f64s(0.0,
-                                     &Array::linspace(0.0, 1.0, x_bins).to_vec()[1..])?;
-    let template =
-        SplitMat::constant(0, vec![y_dim, x_dim]);
+                                     &Array::linspace(0.0, range_upper_bound.raw(), x_bins).to_vec()[1..])?;
+    let template = GradedBounds { y: y_dim, x: x_dim };
 
     //Take our sample and convert it to a vector
 
-    let sample = scaled.sample(&template, SampleType::MEAN).unwrap();
+    let sample = matrix.sample(&template, SampleType::MEAN).unwrap();
     let shape = sample.shape();
     let mut vector = vec![0.0; shape[0] * shape[1]];
     let mut pos = 0;
@@ -633,7 +630,8 @@ mod tests {
     use crate::hilbert_distance::SplitMat;
     use ndarray::arr2;
     use noisy_float::types::r64;
-    use crate::hilbert_distance::fingerprint;
+//    use crate::hilbert_distance::fingerprint;
+    use crate::rivet::*;
 
     #[test]
     fn expand() {
@@ -714,13 +712,13 @@ mod tests {
         );
 
         println!("split.merge(&split2).expand()");
-        println!("{:?}", split.merge(&split2).expand());
+        println!("{:?}", split.merge(&split2.graded_bounds()).expand());
 
         println!("split2.merge(&split).expand()");
-        println!("{:?}", split2.merge(&split).expand());
+        println!("{:?}", split2.merge(&split.graded_bounds()).expand());
 
-        let left_diff = split.merge(&split2).expand().mat - split2.merge(&split).expand().mat;
-        let right_diff = split2.merge(&split).expand().mat - split.merge(&split2).expand().mat;
+        let left_diff = split.merge(&split2.graded_bounds()).expand().mat - split2.merge(&split.graded_bounds()).expand().mat;
+        let right_diff = split2.merge(&split.graded_bounds()).expand().mat - split.merge(&split2.graded_bounds()).expand().mat;
         assert_eq!(left_diff, -right_diff, "diffs");
 
         let left_weighted = split.weighted_difference(&split2);
@@ -759,13 +757,10 @@ mod tests {
             ],
         );
 
-        let template = SplitMat::constant(
-            0,
-            vec![
-                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
-                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
-            ],
-        );
+        let template = GradedBounds {
+            y: Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
+            x: Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
+        };
         let min = split.sample(&template, SampleType::MIN).unwrap();
         assert_eq!(
             min,
@@ -783,13 +778,10 @@ mod tests {
             ],
         );
 
-        let template = SplitMat::constant(
-            0,
-            vec![
-                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
-                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
-            ],
-        );
+        let template = GradedBounds {
+            y: Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
+            x: Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
+        };
         let max = split.sample(&template, SampleType::MAX).unwrap();
         assert_eq!(
             max,
@@ -807,16 +799,13 @@ mod tests {
             ],
         );
 
-        let template = SplitMat::constant(
-            0,
-            vec![
-                Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
-                Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
-            ],
-        );
+        let template = GradedBounds {
+            y: Dimension::from_f64s(-1., &vec![0.5, 1.0, 3.0]).unwrap(),
+            x: Dimension::from_f64s(-1., &vec![0.5, 2.5, 4.0]).unwrap(),
+        };
 
         let mean = split.sample(&template, SampleType::MEAN).unwrap();
-        let areas = template.regions().map(|r| r.rectangle.area());
+        let areas = template.rectangles().map(|r| r.area());
         let values = arr2(&[
             [
                 1.0 * 0.5 * 0.5,
@@ -879,12 +868,12 @@ partial_charge
         let bytes = compute(&rivet_input, &params).unwrap();
         let results = parse(&bytes).unwrap();
         let structure = structure(&results);
-        let bounds = Bounds {
-            x_low: -5080000.0,
-            y_low: 0.0,
-            x_high: 2950000.0,
-            y_high: 6.0,
-        };
+        let bounds = Bounds::new(
+            0.0,
+            6.0,
+            -5080000.0,
+            2950000.0,
+        );
         //TODO
 //        let fp = fingerprint(&structure, &bounds, (5,5)).unwrap();
 //        println!("Vector: {:#?}", fp);
@@ -930,14 +919,15 @@ partial_charge
         let bytes = compute(&rivet_input, &params).unwrap();
         let results = parse(&bytes).unwrap();
         let structure = structure(&results);
-        let bounds = Bounds {
-            x_low: -1000.0,
-            y_low: 0.0,
-            x_high: 10000.0,
-            y_high: 10.0,
-        };
-        let fp = fingerprint(&structure, &bounds, (5,5)).unwrap();
-        println!("Vector: {:#?}", fp);
+        let bounds = Bounds::new(
+            0.0,
+            10.0,
+            -1000.0,
+            10000.0,
+        );
+        //TODO
+//        let fp = fingerprint(&structure, &bounds, (5, 5)).unwrap();
+//        println!("Vector: {:#?}", fp);
     }
 }
 

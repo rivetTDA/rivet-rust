@@ -1,7 +1,7 @@
 use crate::hera;
 use ndarray::{Array1, Zip};
 use crate::rivet;
-use crate::rivet::RivetError;
+use crate::rivet::{RivetError, Rectangular};
 use std::cmp;
 
 fn find_offset(slope: f64, point: (f64, f64)) -> f64 {
@@ -56,7 +56,7 @@ pub fn match_dist(
     lines: &[(f64, f64)],
     normalize: bool,
 ) -> MatchResult {
-    if fixed_bounds.is_degenerate() {
+    if fixed_bounds.is_empty() {
         MatchResult {
             distance: hera::bottleneck_distance(&multi_bars1[0].bars, &multi_bars2[0].bars)
                 .expect("Couldn't calculate distance"),
@@ -72,8 +72,8 @@ pub fn match_dist(
             raw_distances[i] = dist.unwrap_or(-1.0);
         }
         let failures = raw_distances.fold(0, |x, y| if y < &0.0 { x + 1 } else { x });
-        let delta_x = fixed_bounds.x_high - fixed_bounds.x_low;
-        let delta_y = fixed_bounds.y_high - fixed_bounds.y_low;
+        let delta_x = fixed_bounds.d1().len().raw();
+        let delta_y = fixed_bounds.d0().len().raw();
         //    # now compute matching distance
         //
         //    # to determine the weight of a line with the given slope,
@@ -127,8 +127,12 @@ pub fn matching_distance(
     //    if fixed_bounds is None:
     //    # otherwise, determine bounds from the bounds of the two modules
     let fixed_bounds = comp1.bounds().common_bounds(&comp2.bounds());
-    let ul = (fixed_bounds.x_low, fixed_bounds.y_high);
-    let lr = (fixed_bounds.x_high, fixed_bounds.y_low);
+    let y_ends = fixed_bounds.d0().ends();
+    let x_ends = fixed_bounds.d1().ends();
+    // ul = upper left, when thinking about the RIVET GUI (so low x and high y))
+    let ul = (x_ends.0.raw(), y_ends.1.raw());
+    // lr = lower right, when thinking about the RIVET GUI (so low y and high x))
+    let lr = (x_ends.1.raw(), y_ends.0.raw());
     //    # Now we build up a list of the lines we consider in computing the matching distance.
     //    # Each line is given as a (slope,offset) pair.
     let lines = generate_lines(grid_size, ul, lr);
