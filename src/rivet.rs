@@ -97,8 +97,8 @@ pub struct Bounds {
 impl Bounds {
     pub fn new(y_low: f64, y_high: f64, x_low: f64, x_high: f64) -> Option<Bounds> {
         let rect = Rectangle::closed(
-            (r64(y_low), r64(x_low)),
-            (r64(x_low), r64(x_low)),
+            (r64(y_low), r64(y_high)),
+            (r64(x_low), r64(x_high)),
         )?;
         Some(Bounds { rect })
     }
