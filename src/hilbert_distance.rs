@@ -567,6 +567,19 @@ pub fn fingerprint(structure: &BettiStructure,
                 .to_owned()))?;
     }
 
+    // A graded bounds as big as the bounds
+    let context = {
+        let y_ends = bounds.d0().ends();
+        let x_ends = bounds.d1().ends();
+        GradedBounds {
+            y: Dimension::new(y_ends.0, vec![y_ends.1])?,
+            x: Dimension::new(x_ends.0, vec![x_ends.1])?
+        }
+    };
+
+    // Move the matrix into the larger context:
+    let matrix = matrix.merge(&context);
+
     let (range_upper_bound_y, range_upper_bound_x) = {
         let (w_y, w_x) = weights;
         (r64(w_y), r64(w_x))
@@ -574,7 +587,7 @@ pub fn fingerprint(structure: &BettiStructure,
 
 
     //Normalize it so the system bounds are between 0 and range_upper_bound in both parameters
-    let shift = (-bounds.d0().len(), -bounds.d1().len());
+    let shift = (-bounds.d0().ends().0, -bounds.d1().ends().0);
     let scale =
         (
             range_upper_bound_y / bounds.d0().len(),
