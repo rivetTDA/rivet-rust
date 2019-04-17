@@ -132,7 +132,7 @@ impl SplitMat {
             dimensions: vec![
                 self.dimensions[0].scale(factors.0),
                 self.dimensions[1].scale(factors.1)
-            ]
+            ],
         }
     }
 
@@ -142,7 +142,7 @@ impl SplitMat {
             dimensions: vec![
                 self.dimensions[0].translate(offsets.0),
                 self.dimensions[1].translate(offsets.1)
-            ]
+            ],
         }
     }
 
@@ -150,14 +150,14 @@ impl SplitMat {
         let left_dims = vec![
             self.dimensions[0].merge(&rhs.y),
             self.dimensions[1].merge(&rhs.x)
-            ];
+        ];
         SplitMat::new(self.mat.clone(), left_dims)
     }
 
     fn graded_bounds(&self) -> GradedBounds {
         GradedBounds {
             y: self.dimensions[0].clone(),
-            x: self.dimensions[1].clone()
+            x: self.dimensions[1].clone(),
         }
     }
 
@@ -555,7 +555,8 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
 /// (10, 10)            A 100-element vector that weights param1 and param2 evenly
 pub fn fingerprint(structure: &BettiStructure,
                    bounds: &GradedBounds,
-                   granularity: (usize, usize)) -> Result<Vec<f64>, RivetError> {
+                   granularity: (usize, usize),
+                   weights: (R64, R64)) -> Result<Vec<f64>, RivetError> {
     let (y_bins, x_bins) = granularity;
 
     let bounds = bounds.valid()?;
@@ -569,13 +570,13 @@ pub fn fingerprint(structure: &BettiStructure,
                 .to_owned()))?;
     }
 
-    let range_upper_bound = r64(1.0);
+    let (range_upper_bound_y, range_upper_bound_x) = weights;
 
     //Normalize it so the system bounds are between 0 and range_upper_bound in both parameters
     let shift = (-bounds.y.lower_bound, -bounds.x.lower_bound);
     let scale = (
-        range_upper_bound / (bounds.y.upper_bound() - bounds.y.lower_bound),
-        range_upper_bound / (bounds.x.upper_bound() - bounds.x.lower_bound),
+        range_upper_bound_y / (bounds.y.upper_bound() - bounds.y.lower_bound),
+        range_upper_bound_x / (bounds.x.upper_bound() - bounds.x.lower_bound),
     );
     let mut matrix = matrix
         // Move matrix into the larger context:
@@ -588,18 +589,19 @@ pub fn fingerprint(structure: &BettiStructure,
     // and all the points appear together at a single grade, we need to broaden the range out
     // to the edge of the provided bounds, otherwise we'll incorrectly see this as having
     // zero area.
-    for d in &mut matrix.dimensions {
-        if d.lower_bound == d.upper_bound() {
-            d.upper_bounds[0] = range_upper_bound - r64(std::f64::EPSILON);
-        }
+    if matrix.dimensions[0].lower_bound == matrix.dimensions[0].upper_bound() {
+        matrix.dimensions[0].upper_bounds[0] = range_upper_bound_y - r64(std::f64::EPSILON);
     }
 
+    if matrix.dimensions[1].lower_bound == matrix.dimensions[1].upper_bound() {
+        matrix.dimensions[1].upper_bounds[1] = range_upper_bound_x - r64(std::f64::EPSILON);
+    }
 
     //Now build a template with the right granularity for sampling
     let y_dim = Dimension::from_f64s(0.0,
-                                     &Array::linspace(0.0, range_upper_bound.raw(), y_bins).to_vec()[1..])?;
+                                     &Array::linspace(0.0, range_upper_bound_y.raw(), y_bins).to_vec()[1..])?;
     let x_dim = Dimension::from_f64s(0.0,
-                                     &Array::linspace(0.0, range_upper_bound.raw(), x_bins).to_vec()[1..])?;
+                                     &Array::linspace(0.0, range_upper_bound_x.raw(), x_bins).to_vec()[1..])?;
     let template = GradedBounds { y: y_dim, x: x_dim };
 
     //Take our sample and convert it to a vector
@@ -625,7 +627,7 @@ mod tests {
     use crate::hilbert_distance::SplitMat;
     use ndarray::arr2;
     use noisy_float::types::r64;
-//    use crate::hilbert_distance::fingerprint;
+    //    use crate::hilbert_distance::fingerprint;
     use crate::rivet::*;
 
     #[test]
