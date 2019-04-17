@@ -584,20 +584,15 @@ pub fn fingerprint(structure: &BettiStructure,
         .translate(shift)
         .scale(scale);
 
-//    //TODO: The following is a hack. What we actually need here is to understand the bounds
-//    //in greater detail than the current structure supports. That is, we need bounds
-//    //that are more like Dimensions, so we know what the grades or "tab stops" are, even if we haven't got
-//    //any data that cross even one of them. Then we could set the upper bound to the grade
-//    //above where we have data before scaling the splitmat, and get reasonable results.
-//    //Here's the hack: if either dimension is width zero, treat it as width 1 instead. Otherwise structures
-//    //that do have values (but do not vary, e.g. if the second parameter is constant)
-//    // will be incorrectly assessed as empty
-//    for d in &mut matrix.dimensions {
-//        if d.lower_bound == d.upper_bound() {
-//            d.lower_bound = r64(0.0);
-//            d.upper_bounds[0] = r64(range_upper_bound - std::f64::EPSILON);
-//        }
-//    }
+    // In case there was only a single entry in one dimension, e.g. in homology dimension 1
+    // and all the points appear together at a single grade, we need to broaden the range out
+    // to the edge of the provided bounds, otherwise we'll incorrectly see this as having
+    // zero area.
+    for d in &mut matrix.dimensions {
+        if d.lower_bound == d.upper_bound() {
+            d.upper_bounds[0] = r64(range_upper_bound - std::f64::EPSILON);
+        }
+    }
 
 
     //Now build a template with the right granularity for sampling
