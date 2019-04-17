@@ -590,7 +590,7 @@ pub fn fingerprint(structure: &BettiStructure,
     // zero area.
     for d in &mut matrix.dimensions {
         if d.lower_bound == d.upper_bound() {
-            d.upper_bounds[0] = r64(range_upper_bound - std::f64::EPSILON);
+            d.upper_bounds[0] = range_upper_bound - r64(std::f64::EPSILON);
         }
     }
 
