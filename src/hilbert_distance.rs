@@ -588,12 +588,15 @@ pub fn fingerprint(structure: &BettiStructure,
                                      &Array::linspace(0.0, range_upper_bound_x.raw(), x_bins).to_vec()[1..])?;
     let template = GradedBounds { y: y_dim, x: x_dim };
 
-    let mut matrix = matrix
+    let matrix = matrix
         // Scale and translate so everything is in a known range
         .translate(shift)
-        .scale(scale)
-        // Move matrix into the larger context:
-        .merge(&template);
+        .scale(scale);
+    assert!(matrix.bounds().d0().ends() == (r64(0.0), range_upper_bound_y));
+    assert!(matrix.bounds().d1().ends() == (r64(0.0), range_upper_bound_x));
+    // Move matrix into the larger context:
+    let mut matrix = matrix.merge(&template);
+
     // In case there was only a single entry in one dimension, e.g. in homology dimension 1
     // and all the points appear together at a single grade, we need to broaden the range out
     // to the edge of the provided bounds, otherwise we'll incorrectly see this as having
