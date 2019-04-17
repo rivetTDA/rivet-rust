@@ -502,6 +502,10 @@ pub trait Rectangular {
         Some(Rectangle { d0, d1 })
     }
 
+    fn rectangle(&self) -> Rectangle {
+        Rectangle::new(self.d0(), self.d1())
+    }
+
     fn area(&self) -> R64 {
         let (start0, end0) = self.d0().ends();
         let (start1, end1) = self.d1().ends();
@@ -522,8 +526,8 @@ pub trait Rectangular {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Rectangle {
-    pub d0: Interval,
-    pub d1: Interval,
+    d0: Interval,
+    d1: Interval,
 }
 
 impl Rectangle {
@@ -617,6 +621,10 @@ impl GradedBounds {
                     }
                 });
         results
+    }
+
+    pub fn bounds(&self) -> Bounds {
+        Bounds { rect: self.rectangle() }
     }
 }
 
