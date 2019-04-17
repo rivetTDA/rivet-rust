@@ -556,7 +556,7 @@ impl<'a, 'b> ops::Sub<&'b SplitMat> for &'a SplitMat {
 pub fn fingerprint(structure: &BettiStructure,
                    bounds: &GradedBounds,
                    granularity: (usize, usize),
-                   weights: (R64, R64)) -> Result<Vec<f64>, RivetError> {
+                   weights: (f64, f64)) -> Result<Vec<f64>, RivetError> {
     let (y_bins, x_bins) = granularity;
 
     let bounds = bounds.valid()?;
@@ -570,7 +570,11 @@ pub fn fingerprint(structure: &BettiStructure,
                 .to_owned()))?;
     }
 
-    let (range_upper_bound_y, range_upper_bound_x) = weights;
+    let (range_upper_bound_y, range_upper_bound_x) = {
+        let (w_y, w_x) = weights;
+        (r64(w_y), r64(w_x))
+    };
+
 
     //Normalize it so the system bounds are between 0 and range_upper_bound in both parameters
     let shift = (-bounds.y.lower_bound, -bounds.x.lower_bound);
