@@ -89,9 +89,17 @@ pub struct BettiStructure {
     pub points: Vec<StructurePoint>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Bounds {
     rect: Rectangle
+}
+
+impl Display for Bounds {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let d0_ends = self.d0().ends();
+        let d1_ends = self.d1().ends();
+        write!(f, "Bounds(d0: [{}, {}], d1: [{}, {}])", d0_ends.0, d0_ends.1, d1_ends.0, d1_ends.1)
+    }
 }
 
 impl Bounds {
@@ -101,6 +109,10 @@ impl Bounds {
             (r64(x_low), r64(x_high)),
         )?;
         Some(Bounds { rect })
+    }
+
+    pub fn union(&self, other: &Bounds) -> Bounds {
+        Bounds { rect: self.rect.union(&other.rect) }
     }
 }
 
@@ -524,7 +536,7 @@ pub trait Rectangular {
     fn translate(&self, offsets: (R64, R64)) -> Self;
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Rectangle {
     d0: Interval,
     d1: Interval,
@@ -540,6 +552,13 @@ impl Rectangle {
             d0: Interval::new(d0.0, OpenClosed::Closed, d0.1, OpenClosed::Closed)?,
             d1: Interval::new(d1.0, OpenClosed::Closed, d1.1, OpenClosed::Closed)?,
         })
+    }
+
+    pub fn union(&self, other: &Rectangle) -> Rectangle {
+        Rectangle {
+            d0: self.d0.union(&other.d0),
+            d1: self.d1.union(&other.d1)
+        }
     }
 }
 
@@ -603,10 +622,10 @@ impl GradedBounds {
             })
     }
 
-    pub fn common_bounds(self: &GradedBounds, other: &GradedBounds) -> GradedBounds {
-        GradedBounds{
+    pub fn union(self: &GradedBounds, other: &GradedBounds) -> GradedBounds {
+        GradedBounds {
             x: self.x.merge(&other.x),
-            y: self.y.merge(&other.y)
+            y: self.y.merge(&other.y),
         }
     }
 
@@ -615,11 +634,11 @@ impl GradedBounds {
         let d1_ints = self.x.intervals();
         let results =
             Array2::from_shape_fn((d0_ints.len(), d1_ints.len()), |(row_idx, col_idx)| {
-                    Rectangle {
-                        d0: d0_ints[row_idx].clone(),
-                        d1: d1_ints[col_idx].clone(),
-                    }
-                });
+                Rectangle {
+                    d0: d0_ints[row_idx].clone(),
+                    d1: d1_ints[col_idx].clone(),
+                }
+            });
         results
     }
 
@@ -741,6 +760,9 @@ pub enum RivetErrorKind {
 
     #[fail(display = "RIVET computation failure: {}", _0)]
     Computation(String),
+
+    #[fail(display = "The bounds {} do not contain the bounds {}", _0, _1)]
+    BoundsInsufficient(Bounds, Bounds),
 }
 
 pub fn invalid<T>(message: &str) -> Result<T, RivetError> {

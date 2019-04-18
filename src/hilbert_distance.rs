@@ -556,25 +556,25 @@ pub fn fingerprint(structure: &BettiStructure,
                    weights: (f64, f64)) -> Result<Vec<f64>, RivetError> {
     let (y_bins, x_bins) = granularity;
 
-//    let bounds = bounds.valid()?;
 
     //First, generate a splitmat from the structure
 
     let matrix = SplitMat::betti_to_splitmat(structure)?;
-    if !bounds.contains(&matrix.bounds()) {
-        Err(RivetErrorKind::Validation(
-            format!("Bounds {:#?} must enclose structure bounds {:#?}", bounds, matrix.bounds())
-                .to_owned()))?;
-    }
 
     // A graded bounds as big as the bounds
     let context = {
         let y_ends = bounds.d0().ends();
         let x_ends = bounds.d1().ends();
-        GradedBounds {
+        let gb = GradedBounds {
             y: Dimension::new(y_ends.0, vec![y_ends.1])?,
             x: Dimension::new(x_ends.0, vec![x_ends.1])?
+        };
+        let mb = matrix.graded_bounds();
+
+        if !gb.contains(&mb) {
+            Err(RivetErrorKind::BoundsInsufficient(bounds.clone(), gb.union(&mb).bounds()))?
         }
+        gb
     };
 
     // Move the matrix into the larger context:
