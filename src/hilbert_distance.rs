@@ -605,8 +605,16 @@ pub fn fingerprint(structure: &BettiStructure,
         // Scale and translate so everything is in a known range
         .translate(shift)
         .scale(scale);
-    assert!(matrix.bounds().d0().ends() == (r64(0.0), range_upper_bound_y));
-    assert!(matrix.bounds().d1().ends() == (r64(0.0), range_upper_bound_x));
+    {
+        let test_bounds = matrix.bounds();
+        let test_d0 = test_bounds.d0().ends();
+        let test_d1 = test_bounds.d1().ends();
+        let expect_d0 = (r64(0.0), range_upper_bound_y);
+        let expect_d1 = (r64(0.0), range_upper_bound_x);
+        assert_eq!(expect_d0, test_d0, "Expected d0 to be {:?} but was {:?}", expect_d0, test_d0);
+        assert_eq!(expect_d1, test_d1, "Expected d1 to be {:?} but was {:?}", expect_d1, test_d1);
+
+    }
     // Move matrix into the larger context:
     let mut matrix = matrix.merge(&template);
 
