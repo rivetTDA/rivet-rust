@@ -611,8 +611,8 @@ pub fn fingerprint(structure: &BettiStructure,
         let test_d1 = test_bounds.d1().ends();
         let expect_d0 = (r64(0.0), range_upper_bound_y);
         let expect_d1 = (r64(0.0), range_upper_bound_x);
-        assert_eq!(expect_d0, test_d0, "Expected d0 to be {:?} but was {:?}", expect_d0, test_d0);
-        assert_eq!(expect_d1, test_d1, "Expected d1 to be {:?} but was {:?}", expect_d1, test_d1);
+        assert!((expect_d0.1 - test_d0.1).abs() < r64(0.001), "Expected d0 to be close to {:?} but was {:?}", expect_d0, test_d0);
+        assert!((expect_d1.1 - test_d1.1).abs() < r64(0.001), "Expected d1 to be close to {:?} but was {:?}", expect_d1, test_d1);
 
     }
     // Move matrix into the larger context:
