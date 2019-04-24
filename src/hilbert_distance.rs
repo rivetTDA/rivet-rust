@@ -469,7 +469,7 @@ impl<'a> ops::Add<SplitMat> for &'a SplitMat {
         let left = self.merge(&rhs.graded_bounds()).expand();
         let right = rhs.merge(&self.graded_bounds()).expand();
         if left.mat.shape() != right.mat.shape() {
-            println!(
+            error!(
                 "Merged splitmat shapes don't match!
             \nOriginal left: {:?}
             \nOriginal right: {:?}
@@ -479,8 +479,8 @@ impl<'a> ops::Add<SplitMat> for &'a SplitMat {
                 &left.mat.shape(),
                 &right.mat.shape()
             );
-            println!("Left expanded dimensions: {:?}", &left.dimensions);
-            println!("Right expanded dimensions: {:?}", &right.dimensions);
+            error!("Left expanded dimensions: {:?}", &left.dimensions);
+            error!("Right expanded dimensions: {:?}", &right.dimensions);
             panic!("Matrix shapes don't match after expansion");
         }
         SplitMat {
