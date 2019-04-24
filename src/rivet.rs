@@ -412,12 +412,20 @@ impl Dimension {
             self.verify();
         }
         if bound < self.lower_bound {
-            self.upper_bounds.insert(0, self.lower_bound);
-            self.upper_indexes.insert(0, None);
+            if self.lower_bound != self.upper_bounds[0] {
+                self.upper_bounds.insert(0, self.lower_bound);
+                self.upper_indexes.insert(0, None);
+            }
             self.lower_bound = bound;
         } else if bound > *self.upper_bounds.last().expect("No upper bounds?") {
-            self.upper_bounds.push(bound);
-            self.upper_indexes.push(None);
+            if self.upper_bounds.len() == 1 && self.lower_bound == self.upper_bounds[0] {
+                //TODO: 0-width dimensions are fiddly. This maybe has different behavior depending
+                //on what order bounds get added?
+                self.upper_bounds[0] = bound;
+            } else {
+                self.upper_bounds.push(bound);
+                self.upper_indexes.push(None);
+            }
         } else if self.is_bound(bound) {
             //Nothing to do
         } else {
@@ -1286,4 +1294,27 @@ fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, com
 
 fn parse_metric(_buf: &mut Iterator<Item=Result<String, std::io::Error>>, _comment: Vec<String>) -> Result<RivetInput, RivetError> {
     unimplemented!()
+}
+
+
+#[test]
+fn test_dimension_merge() {
+    let d1 = Dimension::from_f64s(-1.0, &vec![0.0, 1.0, 2.0]).unwrap();
+    let d2 = Dimension::from_f64s(-2.0, &vec![0.0, 1.5, 3.0]).unwrap();
+    let merged = d1.merge(&d2);
+    let expected = Dimension::from_f64s(-2.0, &vec![-1.0, 0.0, 1.0, 1.5, 2.0, 3.0]).unwrap();
+    assert_eq!(merged.lower_bound, expected.lower_bound);
+    assert_eq!(merged.upper_bounds, expected.upper_bounds);
+}
+
+
+
+#[test]
+fn test_dimension_merge_zero_length() {
+    let d1 = Dimension::from_f64s(-1.0, &vec![-1.0]).unwrap();
+    let d2 = Dimension::from_f64s(-2.0, &vec![-1.0, 1.0, 2.0]).unwrap();
+    let merged = d1.merge(&d2);
+    let expected = Dimension::from_f64s(-2.0, &vec![-1.0, 1.0, 2.0]).unwrap();
+    assert_eq!(merged.lower_bound, expected.lower_bound);
+    assert_eq!(merged.upper_bounds, expected.upper_bounds);
 }
