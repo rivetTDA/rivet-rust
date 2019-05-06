@@ -595,12 +595,18 @@ pub fn fingerprint(structure: &BettiStructure,
         );
 
     //Now build a template with the right granularity for sampling
-    let y_dim = Dimension::from_f64s(0.0,
-                                     &Array::linspace(0.0, range_upper_bound_y.raw(), y_bins).to_vec()[1..])?;
-    let x_dim = Dimension::from_f64s(0.0,
-                                     &Array::linspace(0.0, range_upper_bound_x.raw(), x_bins).to_vec()[1..])?;
-    let template = GradedBounds { y: y_dim, x: x_dim };
-
+    let template = {
+        let mut y_dim = Dimension::from_f64s(0.0,
+                                         &Array::linspace(0.0, range_upper_bound_y.raw(), y_bins).to_vec()[1..])?;
+        let mut x_dim = Dimension::from_f64s(0.0,
+                                         &Array::linspace(0.0, range_upper_bound_x.raw(), x_bins).to_vec()[1..])?;
+        // Directly set the end points to avoid any possible rounding error
+        let y_len = y_dim.upper_bounds.len();
+        y_dim.upper_bounds[y_len - 1] = range_upper_bound_y;
+        let x_len = x_dim.upper_bounds.len();
+        x_dim.upper_bounds[x_len - 1] = range_upper_bound_x;
+        GradedBounds { y: y_dim, x: x_dim }
+    };
     let mut matrix = matrix
         // Scale and translate so everything is in a known range
         .translate(shift)
