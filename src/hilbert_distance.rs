@@ -601,7 +601,7 @@ pub fn fingerprint(structure: &BettiStructure,
                                      &Array::linspace(0.0, range_upper_bound_x.raw(), x_bins).to_vec()[1..])?;
     let template = GradedBounds { y: y_dim, x: x_dim };
 
-    let matrix = matrix
+    let mut matrix = matrix
         // Scale and translate so everything is in a known range
         .translate(shift)
         .scale(scale);
@@ -613,7 +613,11 @@ pub fn fingerprint(structure: &BettiStructure,
         let expect_d1 = (r64(0.0), range_upper_bound_x);
         assert!((expect_d0.1 - test_d0.1).abs() < r64(0.001), "Expected d0 to be close to {:?} but was {:?}", expect_d0, test_d0);
         assert!((expect_d1.1 - test_d1.1).abs() < r64(0.001), "Expected d1 to be close to {:?} but was {:?}", expect_d1, test_d1);
-
+        // Directly set the end points to avoid any possible rounding error
+        let d0_len = matrix.dimensions[0].upper_bounds.len();
+        matrix.dimensions[0].upper_bounds[d0_len - 1] = range_upper_bound_y;
+        let d1_len = matrix.dimensions[1].upper_bounds.len();
+        matrix.dimensions[1].upper_bounds[d1_len - 1] = range_upper_bound_x;
     }
     // Move matrix into the larger context:
     let mut matrix = matrix.merge(&template);
@@ -633,7 +637,7 @@ pub fn fingerprint(structure: &BettiStructure,
 
     //Take our sample and convert it to a vector
 
-    let sample = matrix.sample(&template, SampleType::MEAN).unwrap();
+    let sample = matrix.sample(&template, SampleType::MEAN)?;
     let shape = sample.shape();
     let mut vector = vec![0.0; shape[0] * shape[1]];
     let mut pos = 0;

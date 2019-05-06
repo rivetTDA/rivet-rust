@@ -1255,7 +1255,7 @@ fn parse_r64(s: &str) -> Result<R64, RivetError> {
 }
 
 fn parse_pointcloud(buf: &mut Iterator<Item=Result<String, std::io::Error>>, comment: Vec<String>) -> Result<RivetInput, RivetError> {
-    let point_dim = line_or(buf.next(), "No dimension line!")?;
+    let _point_dim = line_or(buf.next(), "No dimension line!")?;
     let cutoff = parse_r64(&line_or(buf.next(), "No max distance!")?)?;
     let appearance_label = line_or(buf.next(), "No label!")?;
     let mut points = vec![];
